@@ -70,7 +70,7 @@ static int fd_transfer(bool is_read, uint8_t minor, uint8_t rawflag)
     uint16_t dptr;
     uint16_t ct = 0;
     uint8_t st;
-    int map = 0;
+    uint8_t map = 0;
     uint16_t *page = &udata.u_page;
 
     if(rawflag == 1) {
@@ -124,7 +124,7 @@ static int fd_transfer(bool is_read, uint8_t minor, uint8_t rawflag)
         st = fd_status;
         /* Real disks would need retries */
         if (st) {
-            kprintf("fd%d: block %d, error %d\n", minor, st, udata.u_block);
+            kprintf("fd%d: block %d, error %d\n", minor, udata.u_block, st);
             break;
         }
         udata.u_block++;

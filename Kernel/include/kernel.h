@@ -21,6 +21,10 @@ From UZI by Doug Braun and UZI280 by Stefan Nitschke.
 #define NULL (void *)0
 #endif
 
+#ifndef regptr
+#define regptr
+#endif
+
 #define min(a,b) ( (a) < (b) ? (a) : (b) )
 #define max(a,b) ( (a) > (b) ? (a) : (b) )
 #define aligndown(v,a) (uint8_t*)((intptr_t)(v) & ~((a)-1))
@@ -36,24 +40,49 @@ From UZI by Doug Braun and UZI280 by Stefan Nitschke.
 #define ALIGNDOWN(v) (v)
 #endif
 
+/* These work fine for most compilers but can be overriden for those where the
+   resulting code generation is foul */
+#ifndef LOWORD
+#define LOWORD(x)	((uint16_t)(x))
+#endif
+#ifndef HIBYTE32
+#define HIBYTE32(x)	((uint8_t)((x) >> 24))
+#endif
+
+#ifndef CONFIG_BLOCK_SLEEP
+#define i_unlock(x)	do {} while(0)
+#define i_lock(x)	do {} while(0)
+#define i_islocked(x)	do {} while(0)
+#define i_unlock_deref(x)	i_deref(x)
+#define n_open_lock(a,b)	n_open((a),(b))
+#define getinode_lock(x)	getinode(x)
+#endif
+
 #ifdef CONFIG_LEVEL_2
 #include "level2.h"
 #else
 
-#define jobcontrol_in(x,y,z)	0
-#define jobcontrol_out(x,y,z)	0
+#define jobcontrol_in(x,y)	0
+#define jobcontrol_out(x,y)	0
 #define jobcontrol_ioctl(x,y,z)	0
 
 #define limit_exceeded(x,y) (0)
 #define can_signal(p, sig) \
 	(udata.u_ptab->p_uid == (p)->p_uid || super())
-#define pathbuf()	tmpbuf()
-#define pathfree(tb)	brelse(tb)
 #define dump_core(sig)	sig
 #define in_group(x)	0
 #endif
 
-#define CPM_EMULATOR_FILENAME    "/usr/cpm/emulator"
+/* CPU families */
+#define CPUTYPE_Z80	0
+#define CPUTYPE_6809	1
+#define CPUTYPE_6502	2
+#define CPUTYPE_68000	3
+#define CPUTYPE_PDP11	4
+#define CPUTYPE_MSP430	5
+#define CPUTYPE_68HC11	6
+#define CPUTYPE_8086	7
+#define CPUTYPE_65C816	8
 
 /* Maximum UFTSIZE can be is 16, then you need to alter the O_CLOEXEC code */
 
@@ -139,29 +168,52 @@ typedef uint16_t blkno_t;    /* Can have 65536 512-byte blocks in filesystem */
 #define BLKSIZE		512
 #define BLKSHIFT	9
 #define BLKMASK		511
-#define BLKOVERSIZE	25	/* Bits 25+ mean we exceeded the file size */
+#define BLKOVERSIZE32	0xFE	/* Bits 25+ mean we exceeded the file size */
 
 /* Help the 8bit compilers out by preventing any 32bit promotions */
 #define BLKOFF(x)	(((uint16_t)(x)) & BLKMASK)
 
-/* we need a busier-than-busy state for superblocks, so that if those blocks
- * are read by userspace through bread() they are not subsequently freed by 
- * bfree() until the filesystem is unmounted */
+/* State of the block. We have some free bits here if we need them */
 #define BF_FREE		0
 #define BF_BUSY		1
-#define BF_SUPERBLOCK	2
 
 /* FIXME: if we could split the data and the header we could keep blocks
    outside of our kernel data (as ELKS does) which would be a win, but need
    some more care on copies, block indexes and directory ops */
+
 typedef struct blkbuf {
-    uint8_t     bf_data[BLKSIZE];    /* This MUST be first ! */
+#ifdef CONFIG_BLKBUF_EXTERNAL
+    uint8_t	*__bf_data;
+#else
+    uint8_t     __bf_data[BLKSIZE];    /* This MUST be first ! */
+#endif
     uint16_t    bf_dev;
     blkno_t     bf_blk;
     uint8_t     bf_dirty;	/* bit 0 used */
     uint8_t     bf_busy;	/* bits 0-1 used */
     uint16_t    bf_time;        /* LRU time stamp */
 } blkbuf, *bufptr;
+
+#ifndef CONFIG_BLKBUF_EXTERNAL
+#define blktok(kaddr,buf,off,len) \
+    memcpy((kaddr), (buf)->__bf_data + (off), (len))
+#define blkfromk(kaddr,buf, off,len) \
+    memcpy((buf)->__bf_data + (off), (kaddr), (len))
+#define blktou(uaddr,buf,off,len) \
+    uput((buf)->__bf_data + (off), (uaddr), (len))
+#define blkfromu(uaddr,buf,off,len) \
+    uget((uaddr),(buf)->__bf_data + (off), (len))
+#define blkptr(buf, off, len)	((void *)((buf)->__bf_data + (off)))
+#define blkzero(buf)		memset(buf->__bf_data, 0, BLKSIZE)
+#else
+extern void blktok(void *kaddr, struct blkbuf *buf, uint16_t off, uint16_t len);
+extern void blkfromk(void *kaddr, struct blkbuf *buf, uint16_t off, uint16_t len);
+extern void blktou(void *kaddr, struct blkbuf *buf, uint16_t off, uint16_t len);
+extern void blkfromu(void *kaddr, struct blkbuf *buf, uint16_t off, uint16_t len);
+/* Worst case is needing to copy over about 64 bytes */
+extern void *blkptr(struct blkbuf *buf, uint16_t offset, uint16_t len);
+extern void blkzero(struct blkbuf *buf);
+#endif
 
 /* TODO: consider smaller inodes or clever caching. 2BSD uses small
    direct block lists to keep inodes small as they must be in memory when
@@ -171,7 +223,7 @@ typedef struct blkbuf {
    disk safely */
 typedef struct dinode {
     uint16_t i_mode;
-    uint16_t i_nlink;
+    uint16_t i_nlink;		/* Note we have 64K inodes so we never overflow */
     uint16_t i_uid;
     uint16_t i_gid;
     uoff_t    i_size;		/* Never negative */
@@ -253,8 +305,7 @@ typedef struct direct {
 
 
 /*
- *	This is actually overlaid over a blkbuf holding the actual
- *	record in question, and pinned until we umount the fs.
+ * Superblock structure
  */
 #define FILESYS_TABSIZE 50
 typedef struct filesys { // note: exists in mem and on disk
@@ -266,11 +317,17 @@ typedef struct filesys { // note: exists in mem and on disk
     int16_t       s_ninode;
     uint16_t      s_inode[FILESYS_TABSIZE];
     uint8_t       s_fmod;
+    /* 0 is 'legacy' and never written to disk */
+#define FMOD_GO_CLEAN	0	/* Write a clean to the disk (internal) */
+#define FMOD_DIRTY	1	/* Mounted or uncleanly unmounted from r/w */
+#define FMOD_CLEAN	2	/* Clean. Used internally to mean don't
+				   update the super block */
     uint8_t       s_timeh;	/* bits 32-40: FIXME - wire up */
     uint32_t      s_time;
     blkno_t       s_tfree;
     uint16_t      s_tinode;
     inoptr        s_mntpt;     /* Mount point */
+    /* TODO: Add geometry hints and support > 512 byte blocks */
 } filesys, *fsptr;
 
 typedef struct oft {
@@ -284,11 +341,11 @@ typedef struct oft {
 struct mount {
     uint16_t m_dev;
     uint16_t m_flags;
-    struct filesys *m_fs;
+    struct filesys m_fs;
 };
-/* The flags are not yet implemented */
 #define MS_RDONLY	1
-#define MS_NOSUID	2
+#define MS_NOSUID	2	/* Not yet implemented */
+#define MS_REMOUNT	128
 
 /* Process table p_status values */
 
@@ -305,7 +362,6 @@ struct mount {
 
 /* 0 is used to mean 'check we could signal this process' */
 
-/* FIXME: finish signal handling */
 #define SIGHUP		 1
 #define SIGINT		 2
 #define SIGQUIT		 3
@@ -344,7 +400,7 @@ struct mount {
 #define  SIG_DFL   (int (*)(int))0	/* Must be 0 */
 #define  SIG_IGN   (int (*)(int))1
 
-#define sigmask(sig)    (1UL<<(sig))
+#define sigmask(sig)    (1U<<((sig) & 0x0F))
 
 /* uadmin */
 
@@ -357,9 +413,15 @@ struct mount {
 #define A_FTRACE		18	/* Unimplemented: 
                                           Hook to the syscall trace debug */
 
-#define AD_NOSYNC		1	/* Unimplemented */
+#define AD_NOSYNC		1
                                           
 /* Process table entry */
+
+struct sigbits {
+    uint16_t	s_pending;
+    uint16_t	s_ignored;
+    uint16_t	s_held;
+};
 
 typedef struct p_tab {
     /* WRS: UPDATE kernel.def IF YOU CHANGE THIS STRUCTURE */
@@ -380,9 +442,7 @@ typedef struct p_tab {
     /* Everything below here is overlaid by time info at exit.
 	 * Make sure it's 32-bit aligned. */
     uint16_t    p_priority;     /* Process priority */
-    uint32_t    p_pending;      /* Bitmask of pending signals */
-    uint32_t    p_ignored;      /* Bitmask of ignored signals */
-    uint32_t    p_held;         /* Bitmask of held signals */
+    struct sigbits p_sig[2];
     uint16_t    p_waitno;       /* wait #; for finding longest waiting proc */
     uint16_t    p_timeout;      /* timeout in centiseconds - 1 */
                                 /* 0 indicates no timeout, 1 = expired */
@@ -471,6 +531,7 @@ typedef struct u_data {
     uint16_t	u_blkoff;	/* Offset in block */
     usize_t	u_nblock;	/* Number of blocks */
     uint8_t	*u_dptr;	/* Address for I/O */
+    usize_t	u_done;		/* Counter for driver methods */
 
 #ifdef CONFIG_LEVEL_2
     uint16_t    u_groups[NGROUP]; /* Group list */
@@ -610,6 +671,8 @@ struct s_argblk {
 #define ENOTCONN	53		/* Transport endpoint is not connected */
 #define EINPROGRESS	54		/* Operation now in progress */
 #define ESHUTDOWN	55		/* Cannot send after transport endpoint shutdown */
+#define EISCONN         56              /* Socket is already connected */
+#define EDESTADDRREQ    57              /* No destination address specified */
 
 /*
  * ioctls for kernel internal operations start at 0x8000 and cannot be issued
@@ -703,7 +766,6 @@ extern size_t strlcpy(char *, const char *, size_t);
 #define ugetw(a)	(*(uint8_t *)(a))
 #define uputc(v, p)	((*(uint8_t*)(p) = (v)) && 0)
 #define uputw(v, p)	((*(uint16_t*)(p) = (v)) && 0)
-#define ugets(a,b,c)	((int)(strlcpy(b,a,c) && 0))
 #define uzero(a,b)	(memset(a,0,b) && 0)
 #else
 extern usize_t valaddr(const char *base, usize_t size);
@@ -711,7 +773,6 @@ extern int uget(const void *userspace_source, void *dest, usize_t count);
 extern int16_t  ugetc(const void *userspace_source);
 extern uint16_t ugetw(const void *userspace_source);
 extern uint32_t _ugetl(void *uaddr);
-extern int ugets(const void *userspace_source, void *dest, usize_t maxlen);
 extern int uput (const void *source,   void *userspace_dest, usize_t count);
 extern int uputc(uint16_t value,  void *userspace_dest);	/* u16_t so we don't get wacky 8bit stack games */
 extern int uputw(uint16_t value, void *userspace_dest);
@@ -721,7 +782,6 @@ extern int uzero(void *userspace_dest, usize_t count);
 /* usermem.c or usermem_std.s */
 extern usize_t _uget(const uint8_t *user, uint8_t *dst, usize_t count);
 extern int _uput(const uint8_t *source, uint8_t *user, usize_t count);
-extern int _ugets(const uint8_t *user, uint8_t *dest, usize_t maxlen);
 extern int _uzero(uint8_t *user, usize_t count);
 
 #if defined CONFIG_USERMEM_DIRECT
@@ -746,9 +806,9 @@ extern uint8_t need_resched;
 
 /* devio.c */
 extern void validchk(uint16_t dev, const char *p);
-extern uint8_t *bread (uint16_t dev, blkno_t blk, bool rewrite);
-extern void brelse(void *bp);
-extern void bawrite(void *bp);
+extern bufptr bread (uint16_t dev, blkno_t blk, bool rewrite);
+extern void brelse(bufptr);
+extern void bawrite(bufptr);
 extern int bfree(bufptr bp, uint8_t dirty); /* dirty: 0=clean, 1=dirty (write back), 2=dirty+immediate write */
 extern void *tmpbuf(void);
 extern void *zerobuf(void);
@@ -756,6 +816,7 @@ extern void bufsync(void);
 extern bufptr bfind(uint16_t dev, blkno_t blk);
 extern void bdrop(uint16_t dev);
 extern bufptr freebuf(void);
+#define tmpfree(x)	brelse((void *)x)
 extern void bufinit(void);
 extern void bufdiscard(bufptr bp);
 extern void bufdump (void);
@@ -772,7 +833,7 @@ extern bool insq(struct s_queue *q, unsigned char c);
 extern bool remq(struct s_queue *q, unsigned char *cp);
 extern void clrq(struct s_queue *q);
 extern bool uninsq(struct s_queue *q, unsigned char *cp);
-extern int psleep_flags_io(void *event, unsigned char flags, usize_t *n);
+extern int psleep_flags_io(void *event, unsigned char flags);
 extern int psleep_flags(void *event, unsigned char flags);
 extern int nxio_open(uint8_t minor, uint16_t flag);
 extern int no_open(uint8_t minor, uint16_t flag);
@@ -782,18 +843,13 @@ extern int no_ioctl(uint8_t minor, uarg_t a, char *b);
 
 /* filesys.c */
 /* open file, "name" in user address space */
-#ifndef CONFIG_LEVEL_0
+extern char lastname[31];
 extern inoptr n_open(char *uname, inoptr *parent);
-#else
-#define n_open	kn_open
-#endif
-/* open file, "name" in kernel address space */
-extern inoptr kn_open(char *uname, inoptr *parent);
 extern inoptr i_open(uint16_t dev, uint16_t ino);
 extern inoptr srch_dir(inoptr wd, char *compname);
 extern inoptr srch_mt(inoptr ino);
+extern bool emptydir(inoptr ino);
 extern bool ch_link(inoptr wd, char *oldname, char *newname, inoptr nindex);
-extern void filename(char *userspace_upath, char *name);
 /* return true if n1 == n2 */
 extern bool namecomp(char *n1, char *n2);
 extern inoptr newfile(inoptr pino, char *name);
@@ -833,6 +889,7 @@ extern arg_t unlinki(inoptr ino, inoptr pino, char *fname);
 
 /* inode.c */
 extern void readi(inoptr ino, uint8_t flag);
+extern uint16_t umove(uint16_t n);	/* Probably wants to move ? */
 extern void writei(inoptr ino, uint8_t flag);
 extern int16_t doclose (uint8_t uindex);
 extern inoptr rwsetup (bool is_read, uint8_t *flag);
@@ -840,8 +897,8 @@ extern int dev_openi(inoptr *ino, uint16_t flag);
 extern void sync(void);
 
 /* mm.c */
-extern unsigned int uputsys(unsigned char *from, usize_t size);
-extern unsigned int ugetsys(unsigned char *to, usize_t size);
+extern unsigned int uputblk(bufptr bp, usize_t to, usize_t size);
+extern unsigned int ugetblk(bufptr bp, usize_t from, usize_t size);
 
 /* process.c */
 extern void psleep(void *event);
@@ -888,6 +945,7 @@ extern int swapwrite(uint16_t dev, blkno_t blkno, usize_t nbytes,
 		     uaddr_t buf, uint16_t page);
 
 extern void swapmap_add(uint8_t swap);
+extern void swapmap_init(uint8_t swap);
 extern int swapmap_alloc(void);
 extern ptptr swapneeded(ptptr p, int selfok);
 extern void swapper(ptptr p);
@@ -919,7 +977,7 @@ extern void copy_common(uint8_t page);
 extern void pagemap_add(uint8_t page);	/* FIXME: may need a page type for big boxes */
 extern void pagemap_free(ptptr p);
 extern int pagemap_alloc(ptptr p);
-extern int pagemap_realloc(usize_t p);
+extern int pagemap_realloc(usize_t c, usize_t d, usize_t s);
 extern usize_t pagemap_mem_used(void);
 extern void map_init(void);
 #ifndef platform_discard
@@ -933,6 +991,9 @@ extern uint8_t platform_param(char *p);
 extern irqflags_t __hard_di(void);
 extern void __hard_irqrestore(irqflags_t f);
 extern void __hard_ei(void);
+
+extern int platform_rtc_read(void);
+extern int platform_rtc_write(void);
 
 #ifndef CONFIG_SOFT_IRQ
 #define di __hard_di

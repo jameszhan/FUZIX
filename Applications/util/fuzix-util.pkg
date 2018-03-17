@@ -26,6 +26,7 @@ f 0755 /bin/echo        echo
 f 0755 /bin/ed          ed
 f 0755 /bin/fgrep       fgrep
 f 0755 /bin/kill        kill
+f 0755 /bin/killall     killall
 f 0755 /bin/ln          ln
 f 0755 /bin/ls          ls
 f 0755 /bin/mkdir       mkdir
@@ -36,6 +37,7 @@ f 0755 /bin/mv          mv
 f 0755 /bin/printenv    printenv
 f 0755 /bin/ps          ps
 f 0755 /bin/pwd         pwd
+f 0755 /bin/remount     remount
 f 0755 /bin/rm          rm
 f 0755 /bin/rmdir       rmdir
 f 0755 /bin/ssh         ssh
@@ -59,12 +61,13 @@ f 0755 /bin/cut         cut
 f 0755 /bin/decomp16    decomp16
 f 0755 /bin/dirname     dirname
 f 0755 /bin/dosread     dosread
-f 0755 /bin/du          du
 f 0755 /bin/env         env
 f 0755 /bin/factor      factor
 f 0755 /bin/false       false
 f 0755 /bin/fdisk       fdisk
+f 0755 /bin/free        free
 f 0755 /bin/fsck        fsck
+f 0755 /bin/gptparse    gptparse
 f 0755 /bin/grep        grep
 f 0755 /bin/groups      groups
 f 0755 /bin/head        head
@@ -82,7 +85,9 @@ f 0755 /bin/pagesize    pagesize
 f 0755 /bin/passwd      passwd
 f 0755 /bin/prtroot     prtroot
 f 0755 /bin/reboot      reboot
+l /bin/reboot /bin/halt
 f 0755 /bin/sed         sed
+f 0755 /bin/seq         seq
 f 0755 /bin/sleep       sleep
 f 0755 /bin/sort        sort
 f 0755 /bin/sum         sum
@@ -100,6 +105,7 @@ f 0755 /bin/uniq        uniq
 f 0755 /bin/uptime      uptime
 f 0755 /bin/uud         uud
 f 0755 /bin/uue         uue
+f 0755 /bin/vile        vile
 f 0755 /bin/wc          wc
 f 0755 /bin/which       which
 f 0755 /bin/who         who

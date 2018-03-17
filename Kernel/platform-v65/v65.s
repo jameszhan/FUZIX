@@ -76,7 +76,7 @@ ___hard_ei:
 
 ___hard_irqrestore:
 	    and #4		; IRQ flag
-	    beq irq_on
+	    bne irq_on
 	    cli
 	    rts
 irq_on:
@@ -555,8 +555,22 @@ platform_doexec:
 	    stx ptr1+1
 	    sta ptr1
 
+	    clc
+	    adc #$20
+	    bcc noincx
+	    inx
+noincx:
+	    stx ptr2+1		; Point ptr2 at base + 0x20
+	    sta ptr2
+	    ldy #0
+	    lda (ptr2),y	; Get the signal vector pointer
+	    sta PROGLOAD+$20	; if we loaded high put the vecotr in
+	    iny
+	    lda (ptr2),y
+	    sta PROGLOAD+$21	; the low space where it is expected
+
 ;
-;	Set up the C stack
+;	Set up the C stack. FIXME: assumes for now our sp in ZP matches it
 ;
 	    lda U_DATA__U_ISP
 	    sta sp
@@ -570,6 +584,7 @@ platform_doexec:
 	    txs
 	    ldx #>PROGLOAD	; For the relocation engine
 	    lda #ZPBASE
+	    ldy #0
 	    jmp (ptr1)		; Enter user application
 
 ;

@@ -79,7 +79,7 @@ void pagemap_init(void)
     pagemap_add(6);
     /* initialize swap pages */
     for (i = 0; i<MAX_SWAPS; i++)
-	swapmap_add(i);
+	swapmap_init(i);
 }
 
 DISC
@@ -98,21 +98,9 @@ uint8_t platform_param(char *p)
 	    swapdev = bootdevice(p+5);
 	    return -1;
 	}
+	if (!strncmp(p,"VTMODE=", 7)){
+	    set_defmode( p );
+	    return -1;
+	}
 	return 0;
 }
-
-#ifdef CONFIG_LEVEL_2
-
-/* We always use 512 byte paths so no special pathbuf needed */
-
-char *pathbuf(void)
-{
-	return tmpbuf();
-}
-
-void pathfree(char *tb)
-{
-	brelse(tb);
-}
-
-#endif

@@ -28,6 +28,7 @@ typedef uint16_t uptr_t;		/* User pointer equivalent */
 
 extern void *memcpy(void *, const void *, size_t);
 extern void *memset(void *, int, size_t);
+extern int strcmp(const char *, const char *);
 extern size_t strlen(const char *);
 extern uint16_t swab(uint16_t);
 
@@ -68,3 +69,5 @@ typedef union {            /* this structure is endian dependent */
 #define gcc_miscompile_workaround()	__asm("":::"memory")
 
 #define BIG_ENDIAN
+
+#define CPUTYPE	CPUTYPE_6809

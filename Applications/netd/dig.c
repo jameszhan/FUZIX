@@ -45,14 +45,15 @@ int send_question( char *name ){
     struct header *p=( struct header *)buf;
     struct RRtail *t;
     
+    char *i = name;
+    char *o = buf + sizeof(struct header);
+    char *l = o++;
+
     memset( p, 0, sizeof(buf) );
     p->id = 42;     /* "random" query ID */
     p->cntl = 0x1;  /* request a recursive query */
     p->qdcount = 1; /* one question */
     /* fill out name string */
-    char *i = name;
-    char *o = buf + sizeof(struct header);
-    char *l = o++;
     
     while(1){
 	if( ! *i )
@@ -190,7 +191,7 @@ int main( int argc, char *argv[] ){
 	if( argv[x][0] == '@' )
 	    strncpy( server, &(argv[x][1]), 16);
 	else
-	    strncpy( name, argv[x], 16 );
+	    strncpy( name, argv[x], 256 );
     }
 
     fd = socket( AF_INET, SOCK_DGRAM, 0);

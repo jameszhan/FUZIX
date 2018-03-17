@@ -116,8 +116,10 @@ int pagemap_alloc( ptptr p ){
 
 /*
  *	Reallocate the maps for a process
+ *
+ *	FIXME: this is a quick hack for non split I/D old style chmem
  */
-int pagemap_realloc(usize_t size)
+int pagemap_realloc(usize_t code, usize_t size, usize_t stack)
 {
 	int8_t have = maps_needed(udata.u_top);
 	int8_t want = maps_needed(size);
@@ -171,7 +173,7 @@ int pagemap_realloc(usize_t size)
 
 usize_t pagemap_mem_used(void)
 {
-	return pfptr << 4;
+	return procmem - (pfptr << 4);
 }
 
 #ifdef SWAPDEV
@@ -182,7 +184,7 @@ usize_t pagemap_mem_used(void)
    that copies the current common page to the specified page.
 */
 
-uint8_t get_common()
+uint8_t get_common(void)
 {
 	ptptr p = NULL;
 	/* if current context is dead, then reuse it's common */
@@ -300,6 +302,7 @@ void swapin(ptptr p, uint16_t map)
 		else
 			size = 0x20;	/* 16 K */
 	}
+
 #ifdef DEBUG
 	kprintf("%x: swapin done %d\n", p, p->p_page);
 #endif

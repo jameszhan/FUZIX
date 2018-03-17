@@ -23,8 +23,8 @@ typedef uint16_t uptr_t;		/* User pointer equivalent */
 
 /* FIXME: we actually want to use an a.out loader */
 
-#define EMAGIC    0x7E    /* Header of executable  (JMP) */
-#define EMAGIC_2  0x20    /* BRA */
+#define EMAGIC    0x01    /* Header of executable  (BR) */
+#define EMAGIC_2  0x01	  /* Only BR is recognized */
 
 /* Allow a minimum of 512 bytes gap between stack and top of allocations */
 #define brk_limit() (udata.u_syscall_sp - 512)
@@ -76,3 +76,5 @@ typedef union {            /* this structure is endian dependent */
 
 #define BIG_ENDIAN
 #define PDP_ENDIAN
+
+#define CPUTYPE	CPUTYPE_PDP11

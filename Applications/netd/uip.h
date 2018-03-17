@@ -597,7 +597,8 @@ void uip_unlisten(uint16_t port);
  * or NULL if no connection could be allocated.
  *
  */
-struct uip_conn *uip_connect(const uip_ipaddr_t *ripaddr, uint16_t port);
+struct uip_conn *uip_connect(const uip_ipaddr_t *ripaddr, uint16_t port,
+			     uint16_t lport);
 
 
 
@@ -1370,6 +1371,7 @@ struct uip_conn {
   uint8_t timer;         /**< The retransmission timer. */
   uint8_t nrtx;          /**< The number of retransmissions for the last
                               segment sent. */
+  uint8_t userrequest;	 /**< Set by a process wanting a poke */
 
   uip_tcp_appstate_t appstate; /** The application state. */
 };

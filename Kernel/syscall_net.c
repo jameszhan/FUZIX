@@ -470,7 +470,7 @@ arg_t _connect(void)
 		if (net_connect(s))
 			return -1;
 		if (sock_wait_leave(s, 0, SS_CONNECTING)) {
-			/* API oddity, thanks Berkley */
+			/* API oddity, thanks Berkeley */
 			if (udata.u_error == EAGAIN)
 				udata.u_error = EINPROGRESS;
 			return -1;
@@ -573,16 +573,16 @@ arg_t _sendto(void)
 	if (s == NULL)
 		return -1;
 
-	if (s->state == SS_UNCONNECTED) {
+	if (s->s_state == SS_UNCONNECTED) {
 		err = sock_autobind(s);
 		if (err)
 			return err;
 	}
-	if (s->state < SS_BOUND) {
+	if (s->s_state < SS_BOUND) {
 		udata.u_error = EINVAL;
 		return -1;
 	}
-	if (s->state != SS_BOUND && s->state < SS_CONNECTED) {
+	if (s->s_state != SS_BOUND && s->s_state < SS_CONNECTED) {
 		udata.u_error = ENOTCONN;
 		return -1;
 	}
@@ -594,7 +594,7 @@ arg_t _sendto(void)
 	alen = ugetw(&uaddr->sio_flags);
 	/* Save the address and then just do a 'write' */
 	if (s->s_type != SOCKTYPE_TCP && alen) {
-		if (s->state >= SS_CONNECTING) {
+		if (s->s_state >= SS_CONNECTING) {
 			udata.u_error = EISCONN;
 			return -1;
 		}
@@ -606,7 +606,7 @@ arg_t _sendto(void)
 		s->s_addr[SADDR_TMP].port = sin.sin_port;
 	} else {
 		s->s_flag &= ~SFLAG_ATMP;
-		if (s->state < SS_CONNECTED) {
+		if (s->s_state < SS_CONNECTED) {
 			udata.u_error = EDESTADDRREQ;
 			return -1;
 		}
@@ -684,7 +684,6 @@ arg_t _shutdown(void)
 #undef fd
 #undef how
 
-#endif
 
 /* FIXME: Move to _discard */
 
@@ -696,3 +695,5 @@ void sock_init(void)
 		(s++)->s_num = n++;
 	netdev_init();
 }
+
+#endif
