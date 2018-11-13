@@ -18,7 +18,13 @@
 #define CONFIG_VT_MULTI
 /* Banked memory set up */
 #define CONFIG_BANK_FIXED
-#define MAX_MAPS	2
+/* Input device support */
+#define CONFIG_INPUT
+/* Full key up/down support */
+#define CONFIG_INPUT_GRABMAX 3
+
+#define MAX_MAPS	62
+
 #define MAP_SIZE	0x8000
 
 #define CONFIG_BANKS	2	/* 2 x 32K */
@@ -58,5 +64,8 @@
 #define NMOUNTS	 4	  /* Number of mounts at a time */
 /* Reclaim the discard space for buffers */
 #define CONFIG_DYNAMIC_BUFPOOL
+/* Use large I/O */
+#define CONFIG_LARGE_IO_DIRECT
 
 extern void platform_discard(void);
+#define platform_copyright()

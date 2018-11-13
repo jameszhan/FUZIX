@@ -59,9 +59,26 @@ struct  s_queue  ttyinq[NUM_DEV_TTY+1] = {       /* ttyinq[0] is never used */
     {   tbuf5,   tbuf5,   tbuf5,   TTYSIZ,   0,   TTYSIZ/2 },
 };
 
+static tcflag_t console_mask[4] = {
+	_ISYS,
+	_OSYS,
+	_CSYS,
+	_LSYS
+};
+
+/* TODO: stty support on the ESCC, ASCI and 16550 */
+tcflag_t *termios_mask[NUM_DEV_TTY + 1] = {
+	NULL,
+	console_mask,
+	console_mask,
+	console_mask,
+	console_mask,
+	console_mask
+};
+
 /* tty_hw_init() which sets up tty5 can be found in discard.c */
 
-void tty_setup(uint8_t minor)
+void tty_setup(uint8_t minor, uint8_t flags)
 {
     minor;
 }
@@ -304,4 +321,8 @@ void kputchar(char c)
     tty_putc(TTYDEV & 0xFF, c);
     if(c == '\n')
         tty_putc(TTYDEV & 0xFF, '\r');
+}
+
+void tty_data_consumed(uint8_t minor)
+{
 }

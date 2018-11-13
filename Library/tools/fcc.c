@@ -4,6 +4,11 @@
 #include <unistd.h>
 #include <sys/wait.h>
 
+/* To fix:
+   reloc: rename __1 map to base.map
+   remove target.lk target.noi .lst .sym
+   if linking remove each .rel .asm (flag to keep .asm ?) */
+
 /*
  *	Wrap the sdcc compiler tools into something more Unixlike and without
  *	spraying support files everwhere
@@ -20,11 +25,13 @@ static char *workdir;		/* Working directory */
 
 static int verbose = 0;
 static int valgrind = 0;
+static int relocatable = 1;
 
 static unsigned int progbase = 0x0100;	/* Program base */
 
 struct arglist {
   struct arglist *next;
+  int flag;
   char p[0];
 };
 
@@ -82,7 +89,14 @@ struct arglist *srchead, *srctail;
 
 static void add_source(const char *p)
 {
+  char *x;
   struct arglist *a = arg_make(p);
+  x = strchr(p, '.');
+  /* Don't clean up passed in binaries */
+  if (x == NULL || strcmp(x, ".c"))
+    a->flag = 0;
+  else
+    a->flag = 1;
   if (srchead == NULL)
     srchead = a;
   else
@@ -138,6 +152,7 @@ static void add_extra(const char *p)
 }
 
 static char *target;
+static char *rootname;
 
 static void set_target(const char *p)
 {
@@ -147,6 +162,7 @@ static void set_target(const char *p)
     exit(1);
   }
   target = mstrdup(p);
+  rootname = target;
 }
 
 static const char *opt;
@@ -196,8 +212,8 @@ static void set_cpu(const char *p)
     exit(1);
   }
   cpu = mstrdup(p);
-  if (strcmp(cpu, "z80") && strcmp(cpu, "z180")) {
-    fprintf(stderr,"fcc: only z80 and z180 targets currently handled.\n");
+  if (strcmp(cpu, "z80") && strcmp(cpu, "z180") && strcmp(cpu, "r2k") && strcmp(cpu, "r3ka")) {
+    fprintf(stderr,"fcc: only Zilog z80, z180 and Rabbit r2k/r3ka targets currently handled.\n");
     exit(1);
   }
 }
@@ -217,8 +233,21 @@ static void set_platform(const char *p)
     oom();
   sprintf(n, "-%s", p);
   platform = n;
-  if (strcmp(platform, "-zx128") == 0)
+  /* TRS80m1 don't need special libraries just a new base address */
+  if (strcmp(platform, "-trs80m1") == 0) {
+    platform="";
     progbase = 0x8000;
+    return;
+  }
+  else if (strcmp(platform, "-zx128") == 0) {
+  /* ZX128 does because it can't use RST for syscalls */
+    progbase = 0x8000;
+    return;
+  }
+  else {
+    fprintf(stderr, "fcc: unknown platform '%s'.\n", p);
+    exit(1);
+  }
 }
 
 static int debug;
@@ -227,6 +256,21 @@ static int werror;
 static int unschar;
 static int nostdio = 0;
 
+
+static char *extendname(const char *r, const char *i, char *ext)
+{
+  char *p = malloc(strlen(r) + strlen(i) + strlen(ext) + 2);
+  char *t;
+  if (p == NULL) {
+    fprintf(stderr, "Out of memory.\n");
+    exit(1);
+  }
+  strcpy(p, r);
+  strcat(p, i);
+  strcat(p, ".");
+  strcat(p, ext);
+  return p;
+}
 
 static char *rebuildname(const char *r, const char *i, char *ext)
 {
@@ -243,6 +287,10 @@ static char *rebuildname(const char *r, const char *i, char *ext)
     t = strrchr(t, '.');
   else
     t = strrchr(p, '.');
+  if (*ext == 0) {
+    *t = 0;
+    return p;
+  }
   if (t)
     strcpy(t + 1, ext);
   else {
@@ -288,11 +336,13 @@ static void autotarget(void)
     return;
 
   if (mode == MODE_LINK) {
+    rootname = rebuildname("", srchead->p, "");
     target = rebuildname("", srchead->p, "ihx");
     return;
   }
   if (mode != MODE_OBJ)
     return;
+  rootname = rebuildname("", srchead->p, "");
   target = rebuildname("", srchead->p, "rel");
 }
 
@@ -309,6 +359,76 @@ static void add_argument(const char *p)
   argvec[argp++] = (char *)p;
   if (verbose)
     printf("[%s] ", p);
+}
+
+static char *delvec[MAX_ARG+1];
+static int delp = 0;
+
+static char *latevec[MAX_ARG+1];
+static int ldelp = 0;
+
+static void delete_temporaries(void)
+{
+  int i ;
+  for (i = 0; i < delp; i++) {
+    if (unlink(delvec[i]) == 0 && verbose)
+      printf("unlink %s\n", delvec[i]);
+    else if (verbose)
+        printf("unlink %s not found.\n", delvec[i]);
+    delvec[i] = NULL;
+  }
+  delp = 0;
+}
+
+static void delete_late(void)
+{
+  int i ;
+  for (i = 0; i < ldelp; i++) {
+    if (unlink(latevec[i]) == 0 && verbose)
+      printf("unlink %s\n", latevec[i]);
+    else if (verbose)
+        printf("unlink %s not found.\n", latevec[i]);
+    delvec[i] = NULL;
+  }
+  delp = 0;
+}
+
+static void reset_arguments(void)
+{
+  delete_temporaries();
+  argp = 0;
+}
+
+static void reset_arguments_nodelete(void)
+{
+  argp = 0;
+}
+
+static const char *add_delete(const char *p)
+{
+  if (delp == MAX_ARG) {
+    fprintf(stderr, "fcc: Too many arguments.\n");
+    exit(1);
+  }
+  delvec[delp++] = (char *)p;
+  return p;
+}
+
+static const char *add_argument_delete(const char *p)
+{
+  add_delete(p);
+  add_argument(p);
+  return p;
+}
+
+static const char *add_delete_late(const char *p)
+{
+  if (ldelp == MAX_ARG) {
+    fprintf(stderr, "fcc: Too many arguments.\n");
+    exit(1);
+  }
+  latevec[ldelp++] = (char *)p;
+  return p;
 }
 
 static void add_option(const char *a, const char *b)
@@ -364,7 +484,10 @@ static int do_command(void)
       argvec[0], strsignal(WTERMSIG(status)));
     return 255;
   }
-  return (WEXITSTATUS(status));
+  status = WEXITSTATUS(status);
+  if (status && verbose)
+    fprintf(stderr, "%s exited with status %d\n", argvec[0], status);
+  return status;
 }
 
 /*
@@ -377,12 +500,28 @@ static char *undotslash(char *p)
     return p + 2;
   return p;
 }
-    
+
+/*
+ *	Magic for relocations
+ */
+
+static char *relocmap(char *in, int pass)
+{
+  char *n;
+  if (!relocatable)
+    return in;
+  /* tack it together */
+  n = malloc(strlen(in) + 4);
+  if (n == NULL)
+    oom();
+  sprintf(n, "%s__%1d", in, pass);
+  return n;
+}
+
 /*
  *	Stitch together an sdcc command.
  */
-
-static void build_command(void)
+static void build_command(int pass)
 {
   char buf[128];
 
@@ -459,24 +598,46 @@ static void build_command(void)
     }
   }
   if (mode == MODE_LINK) {
+    char *rp = "";
+    char *tmp;
+    if (relocatable)
+      rp = "_z80_rel";
     if (target == NULL)
       autotarget();
     if (target == NULL) {
       fprintf(stderr, "no target.\n");
       exit(1);
     }
-    add_option("-o", undotslash(target));
+    add_option("-o", add_delete_late(extendname("",relocmap(undotslash(rootname), pass), "ihx")));
     if (nostdio)
-      snprintf(buf, sizeof(buf), FCC_DIR "/lib/crt0nostdio%s.rel", platform);
+      snprintf(buf, sizeof(buf), FCC_DIR "/lib/crt0%snostdio%s.rel", platform, rp);
     else
-      snprintf(buf, sizeof(buf), FCC_DIR "/lib/crt0%s.rel", platform);
-    add_argument(mstrdup(buf));
+      snprintf(buf, sizeof(buf), FCC_DIR "/lib/crt0%s%s.rel", platform, rp);
+
+    rp = mstrdup(buf);
+    add_argument(rp);
   }
   if (srchead) {
-    if (mode == MODE_OBJ)
+    if (mode == MODE_OBJ) {
       add_argument(srchead->p);
-    else
-      add_argument_list(srchead);
+      if (srchead->flag) {
+        add_delete(rebuildname("", srchead->p, "asm"));
+        add_delete(rebuildname("", srchead->p, "lst"));
+        add_delete(rebuildname("", srchead->p, "sym"));
+      }
+    } else {
+      struct arglist *l = srchead;
+      while(l) {
+        add_argument(l->p);
+        if (srchead->flag) {
+          add_delete(rebuildname("", l->p, "asm"));
+          add_delete(rebuildname("", l->p, "lst"));
+          add_delete_late(rebuildname("", l->p, "rel"));
+          add_delete(rebuildname("", l->p, "sym"));
+        }
+        l = l->next;
+      }
+    }
   }
   else {
     fprintf(stderr, "fcc: No sources specified.\n");
@@ -492,6 +653,8 @@ int main(int argc, const char *argv[]) {
   int i;
   int ret;
   char buf[128];
+
+  atexit(delete_late);
   
   for(i = 1; i < argc; i++) {
     p = argv[i];
@@ -551,6 +714,9 @@ int main(int argc, const char *argv[]) {
           else
             set_cpu(p + 2);
           break;
+        case 'R':
+          relocatable = 0;
+          break;
         case 'M':
           if (p[2] == 0)
             set_map(argv[++i]);
@@ -599,7 +765,7 @@ int main(int argc, const char *argv[]) {
 
   if (mode == MODE_OBJ) {
     while (srchead) {
-      build_command();
+      build_command(0);
       ret = do_command();
       if (ret)
         break;
@@ -612,31 +778,95 @@ int main(int argc, const char *argv[]) {
         }
       }
       srchead = srchead->next;
-      argp = 0;
+      reset_arguments();
     }
   } else {
-      build_command();
+    if (!relocatable || mode != MODE_LINK) {
+      build_command(0);
       ret = do_command();
+    } else {
+      /* FIXME: if we have C source input binary output then split this into
+         two tasks - build to .rel, then link twice */
+      /* Link it at 0x0100 */
+      progbase = 0x0100;
+      build_command(1);
+      ret = do_command();
+      if (ret)
+        exit(ret);
+      reset_arguments();
+      /* And at 0x0200 */
+      progbase = 0x0200;
+      build_command(2);
+      ret = do_command();
+      /* Then post process it */
+    }
   }  
   if (mode != MODE_LINK || ret)
     exit(ret);
-  argp = 0;
-  add_argument("makebin");
-  add_argument("-p");
-  add_argument("-s");
-  add_argument("65535");
-  add_argument(target);
-  add_argument(t = rebuildname("", target, "bin"));
+  reset_arguments();
+
+
+  if (relocatable) {
+    char *r = relocmap(rootname, 1);
+    add_argument("makebin");
+    add_argument("-p");
+    add_argument("-s");
+    add_argument("65535");
+    add_argument_delete(extendname("", r, "ihx"));
+    add_argument_delete(t = extendname("", r, "bin"));
+    add_delete_late(extendname("", r, "noi"));
+    add_delete_late(extendname("", r, "lk"));
+    //add_delete_late(extendname("", r, "map"));
+    ret = do_command();
+    if (ret)
+      exit(ret);
+    free(r);
+    reset_arguments_nodelete();
+    r = relocmap(rootname, 2);
+    add_argument("makebin");
+    add_argument("-p");
+    add_argument("-s");
+    add_argument("65535");
+    add_argument_delete(extendname("", r, "ihx"));
+    add_argument_delete(t = extendname("", r, "bin"));
+    add_delete_late(extendname("", r, "noi"));
+    add_delete_late(extendname("", r, "lk"));
+    add_delete_late(extendname("", r, "map"));
+    ret = do_command();
+    if (ret)
+      exit(ret);
+    free(r);
+    t = extendname("", rootname, "bin");
+  } else {
+    add_argument("makebin");
+    add_argument("-p");
+    add_argument("-s");
+    add_argument("65535");
+    add_argument(target);
+    add_argument_delete(t = extendname("", rootname, "bin"));
+    add_delete_late(extendname("", rootname, "noi"));
+    add_delete_late(extendname("", rootname, "lk"));
+    ret = do_command();
+    if (ret)
+      exit(ret);
+  }
+  reset_arguments_nodelete();
+  if (relocatable) {
+    add_argument(FCC_DIR "/bin/relocbin");
+    t = extendname("", relocmap(rootname, 1), "bin");
+    add_argument_delete(t);
+    t = extendname("", relocmap(rootname, 2), "bin");
+    add_argument_delete(t);
+    add_argument(extendname("", relocmap(rootname, 1), "map"));
+  } else {
+    add_argument(FCC_DIR "/bin/binman");
+    snprintf(buf, sizeof(buf), "%x", progbase);
+    add_argument(buf);
+    add_argument_delete(t);
+    add_argument(extendname("", rootname, "map"));
+  }
+  add_argument(rootname);
   ret = do_command();
-  if (ret)
-    exit(ret);
-  argp = 0;
-  add_argument(FCC_DIR "/bin/binman");
-  snprintf(buf, sizeof(buf), "%x", progbase);
-  add_argument(buf);
-  add_argument(t);
-  add_argument(rebuildname("", target, "map"));
-  add_argument(target);
-  ret = do_command();
+  reset_arguments();
   exit(ret);
 }

@@ -51,7 +51,7 @@
 /* Device parameters */
 #define NUM_DEV_TTY 2
 #define TTYDEV   BOOT_TTY /* Device used by kernel for messages, panics */
-#define NBUFS    7       /* Number of block buffers */
+#define NBUFS    5        /* Number of block buffers */
 #define NMOUNTS	 3	  /* Number of mounts at a time */
 
 #define platform_discard()	/* for now - wants fixing */
@@ -59,3 +59,5 @@
 
 #define OFTSIZE		24
 #define ITABSIZE	32
+
+#define platform_copyright()

@@ -5,6 +5,8 @@
 #include <tty.h>
 #include <vt.h>
 #include <devtty.h>
+#include <input.h>
+#include <devinput.h>
 #include <stdarg.h>
 
 char tbuf1[TTYSIZ];
@@ -31,6 +33,29 @@ struct  s_queue  ttyinq[NUM_DEV_TTY+1] = {       /* ttyinq[0] is never used */
     {   tbuf3,   tbuf3,   tbuf3,   TTYSIZ,   0,   TTYSIZ/2 }
 };
 
+static tcflag_t console_mask[4] = {
+	_ISYS,
+	_OSYS,
+	_CSYS,
+	_LSYS
+};
+
+static tcflag_t uart_mask[4] = {
+	_ISYS,
+	/* FIXME: break */
+	_OSYS,
+	/* FIXME CTS/RTS, CSTOPB ? */
+	CSIZE|CBAUD|PARENB|PARODD|_CSYS,
+	_LSYS,
+};
+
+tcflag_t *termios_mask[NUM_DEV_TTY + 1] = {
+	NULL,
+	console_mask,
+	console_mask,
+	uart_mask
+};
+
 /* Write to system console */
 void kputchar(char c)
 {
@@ -52,6 +77,7 @@ void vtbuf_init(void)
 {
     memset(vtbackbuf, ' ', VT_WIDTH * VT_HEIGHT);
 }
+
 void vtexchange(void)
 {
         /* Swap the pointers over: TRS80 video we switch by copying not
@@ -88,7 +114,8 @@ void vtexchange(void)
                 ret
         __endasm;
         /* Cursor back */
-        cursor_on(ttysave[inputtty].cursory, ttysave[inputtty].cursorx);
+        if (!ttysave[inputtty].cursorhide)
+            cursor_on(ttysave[inputtty].cursory, ttysave[inputtty].cursorx);
 }
 
 void tty_putc(uint8_t minor, unsigned char c)
@@ -107,7 +134,8 @@ void tty_putc(uint8_t minor, unsigned char c)
             curtty = minor - 1;
             vt_load(&ttysave[curtty]);
             /* Fix up the cursor */
-            cursor_on(ttysave[curtty].cursory, ttysave[curtty].cursorx);
+            if (!ttysave[curtty].cursorhide)
+                cursor_on(ttysave[curtty].cursory, ttysave[curtty].cursorx);
        }
        vtoutput(&c, 1);
        irqrestore(irq);
@@ -116,6 +144,7 @@ void tty_putc(uint8_t minor, unsigned char c)
 
 void tty_interrupt(void)
 {
+    /* TODO: carrier change handling */
     uint8_t reg = tr1865_status;
     if (reg & 0x80) {
         reg = tr1865_rxtx;
@@ -132,7 +161,7 @@ static const uint8_t trssize[4] = {
     0x00, 0x40, 0x20, 0x60
 };
 
-void tty_setup(uint8_t minor)
+void tty_setup(uint8_t minor, uint8_t flags)
 {
     uint8_t baud;
     uint8_t ctrl;
@@ -144,6 +173,7 @@ void tty_setup(uint8_t minor)
         ttydata[3].termios.c_cflag |= B19200;
         baud = B19200;
     }
+    baud = trsbaud[baud];
     tr1865_baud = baud | (baud << 4);
 
     ctrl = 3;
@@ -177,6 +207,11 @@ void tty_sleeping(uint8_t minor)
         used(minor);
 }
 
+void tty_data_consumed(uint8_t minor)
+{
+    /* FIXME: flow control as implemented now for Model I and III */
+}
+
 uint8_t keymap[8];
 static uint8_t keyin[8];
 static uint8_t keybyte, keybit;
@@ -201,8 +236,13 @@ static void keyproc(void)
 			int m = 1;
 			for (n = 0; n < 8; n++) {
 				if ((key & m) && (keymap[i] & m)) {
-					if (!(shiftmask[i] & m))
+					if (!(shiftmask[i] & m)) {
+					        if (keyboard_grab == 3) {
+						    queue_input(KEYPRESS_UP);
+						    queue_input(keyboard[i][n]);
+                                                }
 						keysdown--;
+                                        }
 				}
 				if ((key & m) && !(keymap[i] & m)) {
 					if (!(shiftmask[i] & m)) {
@@ -227,7 +267,7 @@ uint8_t keyboard[8][8] = {
 	{'x', 'y', 'z', '[', '\\', ']', '^', '_' },
 	{'0', '1', '2', '3', '4', '5', '6', '7' },
 	{'8', '9', ':', ';', ',', '-', '.', '/' },
-	{ KEY_ENTER, KEY_CLEAR, KEY_STOP, KEY_UP, KEY_DOWN, KEY_LEFT, KEY_RIGHT, ' '},
+	{ KEY_ENTER, KEY_CLEAR, KEY_STOP, KEY_UP, KEY_DOWN, KEY_BS, KEY_DEL, ' '},
 	{ 0, 0, 0, 0, KEY_F1, KEY_F2, KEY_F3, 0 }
 };
 
@@ -248,6 +288,7 @@ static uint8_t kbd_timer;
 static void keydecode(void)
 {
 	uint8_t c;
+	uint8_t m = 0;
 
 	if (keybyte == 7 && keybit == 3) {
 		capslock = 1 - capslock;
@@ -255,6 +296,7 @@ static void keydecode(void)
 	}
 
 	if (keymap[7] & 3) {	/* shift */
+	        m = KEYPRESS_SHIFT;
 		c = shiftkeyboard[keybyte][keybit];
 		/* VT switcher */
 		if (c == KEY_F1 || c == KEY_F2) {
@@ -270,6 +312,7 @@ static void keydecode(void)
         /* The keyboard lacks some rather important symbols so remap them
            with control */
 	if (keymap[7] & 4) {	/* control */
+	        m |= KEYPRESS_CTRL;
                 if (keymap[7] & 3) {	/* shift */
                     if (c == '(')
                         c = '{';
@@ -282,10 +325,10 @@ static void keydecode(void)
                     if (c == '<')
                         c = '^';
                 } else {
-                    if (c == '(')
+                    if (c == '8')
                         c = '[';
                     else if (c == ')')
-                        c = ']';
+                        c = '9';
                     else if (c == '-')
                         c = '|';
                     else if (c > 31 && c < 127)
@@ -294,8 +337,29 @@ static void keydecode(void)
 	}
 	else if (capslock && c >= 'a' && c <= 'z')
 		c -= 'a' - 'A';
-	if (c)
-		vt_inproc(inputtty+1, c);
+	if (c) {
+	        switch(keyboard_grab) {
+	        case 0:
+	            vt_inproc(inputtty + 1, c);
+		    break;
+                case 1:
+                    if (!input_match_meta(c)) {
+		        vt_inproc(inputtty + 1, c);
+		        break;
+                    }
+                    /* Fall through */
+                case 2:
+                    queue_input(KEYPRESS_DOWN);
+                    queue_input(c);
+                    break;
+                case 3:
+                    /* Queue an event giving the base key (unshifted)
+                       and the state of shift/ctrl/alt */
+                    queue_input(KEYPRESS_DOWN | m);
+	            queue_input(keyboard[keybyte][keybit]);
+	            break;
+                }
+        }
 }
 
 void kbd_interrupt(void)

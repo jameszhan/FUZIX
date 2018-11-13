@@ -26,7 +26,7 @@ extern uint8_t hz;
 
 
 uint8_t vtattr_cap;
-
+uint8_t curattr;
 
 #define tbuf1 (uint8_t *)(0x2000+TTYSIZ*0)
 #define tbuf2 (uint8_t *)(0x2000+TTYSIZ*1)
@@ -59,6 +59,29 @@ struct s_queue ttyinq[NUM_DEV_TTY + 1] = {
 };
 
 
+static tcflag_t console_mask[4] = {
+	_ISYS,
+	_OSYS,
+	_CSYS,
+	_LSYS
+};
+
+tcflag_t *termios_mask[NUM_DEV_TTY + 1] = {
+	NULL,
+	/* GIME consoles */
+	console_mask,
+	console_mask,
+	/* Drivewire */
+	console_mask,
+	console_mask,
+	console_mask,
+	console_mask,
+	/* Virtual Window */
+	console_mask,
+	console_mask,
+	console_mask,
+	console_mask
+};
 
 
 struct mode_s{
@@ -151,13 +174,13 @@ static struct mode_s mode[5] = {
 	{   0x80, 0x08, 40, 21, 39, 20, &(fmodes[4])  },
 };
 
-
+ 
 static struct pty ptytab[] VSECTD = {
 	{
-		(unsigned char *) 0x2000, 
-		NULL, 
-		0, 
-		{0, 0, 0, 0}, 
+		(unsigned char *) 0x2000,
+		NULL,
+		0,
+		{0, 0, 0, 0, 0, 0, 7, 0},
 		0x10000 / 8,
 		0x04,
 		0x74,              /* 80 column */
@@ -169,10 +192,10 @@ static struct pty ptytab[] VSECTD = {
 		050
 	},
 	{
-		(unsigned char *) 0x3000, 
-		NULL, 
-		0, 
-		{0, 0, 0, 0}, 
+		(unsigned char *) 0x3000,
+		NULL,
+		0,
+		{0, 0, 0, 0, 0, 0, 7, 0},
 		0x11000 / 8,
 		0x04,
 		0x6c,              /* 40 column */
@@ -254,7 +277,7 @@ void tty_sleeping(uint8_t minor)
 }
 
 
-void tty_setup(uint8_t minor)
+void tty_setup(uint8_t minor, uint8_t flags)
 {
 	if (minor > 2) {
 		dw_vopen(minor);
@@ -272,6 +295,10 @@ int tty_carrier(uint8_t minor)
 void tty_interrupt(void)
 {
 
+}
+
+void tty_data_consumed(uint8_t minor)
+{
 }
 
 uint8_t keymap[8];
@@ -476,7 +503,7 @@ void platform_interrupt(void)
 
 void vtattr_notify(void)
 {
-	curpty->attr = ((vtink&7)<<3) + (vtpaper&7);
+	curattr = ((vtink&7)<<3) + (vtpaper&7);
 }
 
 int gfx_ioctl(uint8_t minor, uarg_t arg, char *ptr)

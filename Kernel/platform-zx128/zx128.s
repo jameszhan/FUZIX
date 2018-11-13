@@ -26,8 +26,8 @@
         .globl _need_resched
 
         ; exported debugging tools
-        .globl _trap_monitor
-	.globl _trap_reboot
+        .globl _platform_monitor
+	.globl _platform_reboot
         .globl outchar
 
         ; imported symbols
@@ -71,16 +71,16 @@
 ; -----------------------------------------------------------------------------
             .area _COMMONMEM
 
-_trap_monitor:
+_platform_monitor:
 	;
 	;	Not so much a monitor as wait for space
 	;
 	ld a, #0x7F
 	in a, (0xFE)
 	rra
-	jr c, _trap_monitor
+	jr c, _platform_monitor
 
-_trap_reboot:
+_platform_reboot:
 	di
 	im 1
 	ld bc, #0x7ffd
@@ -439,8 +439,8 @@ __stub_1_ret:
 	call switch_bank
 	pop de
 	push de		; dummy the caller will discard
-	push de
-	ret
+	push de		; FIXME don't we need to use BC and can't we get
+	ret		; rid of all non 0_x stubs ?
 __stub_1_3:
 	ld a, #7
 	jr __stub_1_a

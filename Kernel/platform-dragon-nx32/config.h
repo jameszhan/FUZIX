@@ -38,15 +38,19 @@
 
 /* Video terminal, not a serial tty */
 #define CONFIG_VT
+#define CONFIG_VT_MULTI
 #define CONFIG_FONT8X8
 /* Vt definitions */
-#define VT_WIDTH	32
-#define VT_HEIGHT	24
-#define VT_RIGHT	31
-#define VT_BOTTOM	23
+#define VT_RIGHT	(vt_tright[curtty])
+#define VT_BOTTOM	(vt_tbottom[curtty])
 #define VT_INITIAL_LINE	0
 
 #define VIDEO_BASE	0x0400
+#define VT_ALLBASE	(VIDEO_BASE+0x1800)
+#define map_video(x)
+#define unmap_video(x)
+
+#define CRT9128_BASE	0xFF7C
 
 #define TICKSPERSEC 50   /* Ticks per second */
 /* FIXME: This will move once we put the display in the kernel bank and
@@ -63,7 +67,7 @@
 #define CMDLINE	NULL	  /* Location of root dev name */
 
 /* Device parameters */
-#define NUM_DEV_TTY 4
+#define NUM_DEV_TTY 7
 #define NDEVS    2        /* Devices 0..NDEVS-1 are capable of being mounted */
                           /*  (add new mountable devices to beginning area.) */
 #define TTYDEV   BOOT_TTY /* Device used by kernel for messages, panics */
@@ -75,8 +79,10 @@
 
 #define DW_VSER_NUM 1     /* No of Virtual Serial Ports */
 #define DW_VWIN_NUM 1     /* No of Virtual Window Ports */
-#define DW_MIN_OFF  3     /* Minor number offset */
+#define DW_MIN_OFF  6     /* Minor number offset = first DW ttyX */
 
 /* Remember to update platform-dragon-nx32/kernel.defs to match */
 
 extern void platform_discard(void);
+
+#define platform_copyright()		/* for now */

@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <sys/mount.h>
 #include <mntent.h>
+#include <dirent.h>
 
 static int quiet;
 
@@ -38,18 +39,24 @@ static char *getdev(char *arg, char *p)
 {
 	FILE *f;
 	struct mntent *mnt;
+	const char *path;
 
 	f = setmntent(p, "r");
 	if (f) {
 		while (mnt = getmntent(f)) {
-			if ((strcmp(mnt->mnt_fsname, arg) == 0) || (strcmp(mnt->mnt_dir, arg) == 0)) {
+			path = mnt_device_path(mnt);
+			if ((strcmp(path, arg) == 0) || (strcmp(mnt->mnt_dir, arg) == 0)) {
 				endmntent(f);
-				return strdup(mnt->mnt_fsname);
+				return strdup(path);
 			}
 		}
 		endmntent(f);
 	}
-	return NULL;
+	/* Special case / for boot scripts. If you have no fstab or mtab
+	   we want it to do the right thing anyway so you can clean up nicely */
+	if (strcmp(arg, "/"))
+		return NULL;
+	return root_device_name();
 }
 
 static void rewrite_mtab(char *name, int flags)

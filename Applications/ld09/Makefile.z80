@@ -1,7 +1,7 @@
 .SUFFIXES: .c .rel
 
-CC = fcc
-CFLAGS = -c -O2
+CC = fcc -m$(USERCPU) $(Z80_PLATFORM)
+CFLAGS = -c $(FUZIX_CCOPTS)
 
 DEFS	=
 

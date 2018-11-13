@@ -183,9 +183,17 @@ static int bankmagic(struct areax *ax)
                 return 3;
         if (strcmp(a->a_id, "_DISCARD") == 0)
                 return 0;
-        if (strncmp(a->a_id, "_CODE", 5))
+        if (strcmp(a->a_id, "_DISCARD1") == 0)
+                return 1;
+        if (strcmp(a->a_id, "_DISCARD2") == 0)
+                return 2;
+        if (strcmp(a->a_id, "_BUFFERS1") == 0)
+                return 1;
+        if (strcmp(a->a_id, "_BUFFERS2") == 0)
+                return 2;
+        if (strncmp(a->a_id, "_CODE", 5) && strncmp(a->a_id, "_DATA", 5))
                 return 0;
-        if (a->a_id[5] == 0)	/* We count _CODE and _CODE1 both as first bank */
+        if (a->a_id[0] == 'C' && a->a_id[5] == 0)	/* We count _CODE and _CODE1 both as first bank */
                 return 1;
         c = a->a_id[5] - '0';
         if (c < 1 || c > 9)
@@ -206,9 +214,9 @@ static void bankingstub(struct sym *s, struct areax *bx, int bmagic, int addr)
                 fprintf(ofp, "; Banking Stub %s:%s(%s)\n",
                         a->a_id, s->s_id, s->m_id);
                 fprintf(ofp, "; From area %s\n", bx->a_bap->a_id);
-                fprintf(ofp, "B %02X %04X %02X %s\n",
+                fprintf(ofp, "B %02X %04X %02X %s %s\n",
                         bxm, addr,
-                        bmagic, bx->a_bap->a_id);
+                        bmagic, bx->a_bap->a_id, a->a_id);
         }
         return;
 }

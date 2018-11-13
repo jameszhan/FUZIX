@@ -16,10 +16,10 @@ static const struct display trsdisplay[2] = {
     /* Once we get around to it this is probably best described as
        160 x 72 sixel */
     0,
-    80, 24,
+    160, 72,
     80, 24,
     255, 255,
-    FMT_TEXT,
+    FMT_6PIXEL_128,
     HW_UNACCEL,
     GFX_MULTIMODE|GFX_TEXT,
     2,
@@ -34,8 +34,10 @@ static const struct display trsdisplay[2] = {
     HW_TRS80GFX,
     GFX_MULTIMODE|GFX_MAPPABLE|GFX_OFFSCREEN,	/* Can in theory do pans */
     32,
-    GFX_DRAW|GFX_READ|GFX_WRITE
+    0
   }
+  /* FIXME: Need to add Micrographyx at some point (needs a different id to
+     the TRS80 model III one */
 };
 
 /* Assumes a Tandy board */
@@ -48,60 +50,17 @@ static const struct videomap trsmap = {
   MAP_PIO
 };
 
+
 __sfr __at 0x83 gfx_ctrl;
 
 static uint8_t vmode;
-
-static int gfx_draw_op(uarg_t arg, char *ptr, uint8_t *buf)
-{
-  int l;
-  int c = 8;	/* 4 x uint16_t */
-  uint16_t *p = (uint16_t *)buf;
-  l = ugetw(ptr);
-  if (l < 6 || l > 512)
-    return EINVAL;
-  if (arg != GFXIOC_READ)
-    c = l;
-  if (uget(buf, ptr + 2, c))
-    return EFAULT;
-  switch(arg) {
-  case GFXIOC_DRAW:
-    /* TODO
-    if (draw_validate(ptr, l, 1024, 256))
-      return EINVAL */
-    video_cmd(buf);
-    break;
-  case GFXIOC_WRITE:
-  case GFXIOC_READ:
-  case GFXIOC_EXG:
-    if (l < 8)
-      return EINVAL;
-    l -= 8;
-    if (p[0] > 128 || p[1] > 255 || p[2] > 128 || p[3] > 255 ||
-      p[0] + p[2] > 128 || p[1] + p[3] > 255 ||
-      (p[2] * p[3]) > l)
-      return -EFAULT;
-    if (arg == GFXIOC_WRITE)
-      video_write(buf);
-    else {
-      if (arg == GFXIOC_READ)
-        video_read(buf);
-      else
-        video_exg(buf);
-      if (uput(buf + 10, ptr, l - 2))
-        return EFAULT;
-      return 0;
-    }
-  }
-  return 0;
-}
 
 int gfx_ioctl(uint8_t minor, uarg_t arg, char *ptr)
 {
   uint8_t m;
   int err;
 
-  if (arg >> 8 != 0x03)
+  if (minor > 2 || (arg >> 8 != 0x03))
     return vt_ioctl(minor, arg, ptr);
 
   switch(arg) {
@@ -125,21 +84,6 @@ int gfx_ioctl(uint8_t minor, uarg_t arg, char *ptr)
     if (vmode == 0)
       break;
     return uput(&trsmap, ptr, sizeof(trsmap));
-  case GFXIOC_DRAW:
-  case GFXIOC_READ:
-  case GFXIOC_WRITE:
-  case GFXIOC_EXG:
-    if (vmode == 1) {
-      uint8_t *tmp = (uint8_t *)tmpbuf();
-      err = gfx_draw_op(arg, ptr, tmp);
-      tmpfree(tmp);
-      if (err) {
-        udata.u_error = err;
-        err = -1;
-       }
-       return err;
-    }
-    /* Fall through */
   }
   return -1;
 }

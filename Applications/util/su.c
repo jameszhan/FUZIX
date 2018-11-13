@@ -5,22 +5,31 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <fcntl.h>
 
 /* True if the invoker need not give a password. */
-#define privileged()	(getgid() == 0)
+#define privileged()	(getuid() == 0)
 
 static char *shell1 = "/bin/sh";
 static char *shell2 = "/usr/bin/sh";
 static char *shell3 = "/bin/ssh";
 
-static char USER[20], LOGNAME[25], HOME[100], SHELL[100];
+static char USER[20], LOGNAME[25], HOME[PATHLEN + 6], SHELL[100];
 
 int main(int argc, char *argv[])
 {
-    register char *name, *password;
-    register struct passwd *pwd;
+    const char *name;
+    char *password;
+    struct passwd *pwd;
     int  login_shell = 0;
+    int  fd;
     char *shell, arg0[20];
+
+    /* Stop people trying funny stuff like running it with handle 2 closed
+       and making stderr write to the password file ! */
+    fd = open("/dev/null", O_RDONLY);
+    if (fd == -1 || fd < 3)
+	exit(1);
 
     if (argc > 1 && strcmp(argv[1], "-") == 0) {
 	login_shell = 1;	/* Read .profile */
@@ -70,21 +79,22 @@ int main(int argc, char *argv[])
 	argv[0]++;
 
     if (login_shell) {
+    	/* FIXME: assemble this lot using sbrk ? */
 	arg0[0] = '-';
 	strncpy(arg0 + 1, argv[0], sizeof(arg0) - 2);
 	arg0[sizeof(arg0) - 1] = 0;
 	argv[0] = arg0;
 	strcpy(USER, "USER=");
-	strcpy(USER + 5, name);
+	strlcpy(USER + 5, name, sizeof(USER) - 5);
 	putenv(USER);
 	strcpy(LOGNAME, "LOGNAME=");
-	strcpy(LOGNAME + 8, name);
+	strlcpy(LOGNAME + 8, name, sizeof(LOGNAME) - 8);
 	putenv(LOGNAME);
 	strcpy(SHELL, "SHELL=");
-	strcpy(SHELL + 6, shell);
+	strlcpy(SHELL + 6, shell, sizeof(SHELL) - 6);
 	putenv(SHELL);
 	strcpy(HOME, "HOME=");
-	strcpy(HOME + 5, pwd->pw_dir);
+	strlcpy(HOME + 5, pwd->pw_dir, sizeof(HOME) - 5);
 	putenv(HOME);
 	chdir(pwd->pw_dir);
     }

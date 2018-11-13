@@ -2,18 +2,19 @@
 
 	; Methods provided
 	.globl _vid256x192
-	.globl _plot_char
-	.globl _scroll_up
-	.globl _scroll_down
-	.globl _clear_across
-	.globl _clear_lines
-	.globl _cursor_on
-	.globl _cursor_off
-	.globl _vtattr_notify
+	.globl _m6847_plot_char
+	.globl _m6847_scroll_up
+	.globl _m6847_scroll_down
+	.globl _m6847_clear_across
+	.globl _m6847_clear_lines
+	.globl _m6847_cursor_on
+	.globl _m6847_cursor_off
+	.globl _m6847_cursor_disable
+	.globl _m6847_vtattr_notify
 
-	.globl _video_read
-	.globl _video_write
-	.globl _video_cmd
+	.globl _m6847_video_read
+	.globl _m6847_video_write
+	.globl _m6847_video_cmd
 
 	;
 	; Imports
@@ -24,7 +25,7 @@
 	include "kernel.def"
 	include "../kernel09.def"
 
-	.area .text
+	.area .video
 
 ;
 ;	Dragon video drivers
@@ -54,7 +55,7 @@ vidaddr:
 ;
 ;	plot_char(int8_t y, int8_t x, uint16_t c)
 ;
-_plot_char:
+_m6847_plot_char:
 	pshs y
 	lda 4,s
 	bsr vidaddr		; preserves X (holding the char)
@@ -164,7 +165,7 @@ plot_fast:
 ;
 ;	void scroll_up(void)
 ;
-_scroll_up:
+_m6847_scroll_up:
 	pshs y
 	ldy #VIDEO_BASE
 	leax 256,y
@@ -202,14 +203,14 @@ vscrolln:
 	std ,y++
 	ldd ,x++
 	std ,y++
-	cmpx video_endptr
+	cmpx #VIDEO_END
 	bne vscrolln
 	puls y,pc
 
 ;
 ;	void scroll_down(void)
 ;
-_scroll_down:
+_m6847_scroll_down:
 	pshs y
 	ldy #VIDEO_END
 	leax -256,y
@@ -247,19 +248,14 @@ vscrolld:
 	std ,--y
 	ldd ,--x
 	std ,--y
-	cmpx video_startptr
+	cmpx #VIDEO_BASE
 	bne vscrolld
 	puls y,pc
-
-video_startptr:
-	.dw	VIDEO_BASE
-video_endptr:
-	.dw	VIDEO_END
 
 ;
 ;	clear_across(int8_t y, int8_t x, uint16_t l)
 ;
-_clear_across:
+_m6847_clear_across:
 	pshs y
 	lda 4,s		; x into A, B already has y
 	jsr vidaddr	; Y now holds the address
@@ -282,7 +278,7 @@ clearnext:
 ;
 ;	clear_lines(int8_t y, int8_t ct)
 ;
-_clear_lines:
+_m6847_clear_lines:
 	pshs y
 	clra			; b holds Y pos already
 	jsr vidaddr		; y now holds ptr to line start
@@ -312,7 +308,7 @@ wipel:
 	bne wipel
 	puls y,pc
 
-_cursor_on:
+_m6847_cursor_on:
 	pshs y
 	lda  4,s
 	jsr vidaddr
@@ -320,7 +316,7 @@ _cursor_on:
 	puls y
 	stx cursor_save
 	; Fall through
-_cursor_off:
+_m6847_cursor_off:
 	ldb _vtattr
 	bitb #0x80
 	bne nocursor
@@ -334,16 +330,17 @@ _cursor_off:
 	com 192,x
 	com 224,x
 nocursor:
-_vtattr_notify:
+_m6847_cursor_disable:
+_m6847_vtattr_notify:
 	rts
 ;
 ;	These routines wortk in both 256x192x2 and 128x192x4 modes
 ;	because everything in the X plane is bytewide.
 ;
-_video_write:
+_m6847_video_write:
 	clra			; clr C
 	bra	tfr_cmd
-_video_read:
+_m6847_video_read:
 	coma			; set C
 	bra	tfr_cmd		; go
 
@@ -391,7 +388,7 @@ vidptr:
 	leau d,u
 	rts
 
-_video_cmd:
+_m6847_video_cmd:
 	pshs u
 	bsr vidptr		; u now points to the screen
 nextline:
@@ -415,7 +412,7 @@ endline:
 	bne oploop
 	puls u,pc
 
-	.area .data
+	.area .videodata
 cursor_save:
 	.dw	0
 _vtrow:

@@ -92,8 +92,10 @@ void readi(regptr inoptr ino, uint8_t flag)
 		while (udata.u_count) {
 			pblk = mapcalc(ino, &amount, 1);
 
-#if defined(read_direct)
-			if (!ispipe && pblk != NULLBLK && amount == BLKSIZE && read_direct(flag) && bfind(dev, pblk) == 0) {
+#if !defined(read_direct)
+			bp = NULL;
+#else
+			if (pblk != NULLBLK && (bp = bfind(dev, pblk)) == NULL && !ispipe && amount == BLKSIZE && read_direct(flag)) {
 				/* we can transfer direct from disk to the userspace buffer */
 				/* FIXME: allow for async queued I/O here. We want
 				   an API something like breadasync() that either
@@ -114,12 +116,11 @@ void readi(regptr inoptr ino, uint8_t flag)
 				/* we transfer through the buffer pool */
 				if (pblk == NULLBLK)
 					bp = zerobuf();
-				else
+				else if (bp == NULL)
 					bp = bread(dev, pblk, 0);
 				if (bp == NULL)
 					break;
 				uputblk(bp, uoff(), amount);
-
 				brelse(bp);
 			}
 			/* Bletch */
@@ -169,7 +170,7 @@ void writei(regptr inoptr ino, uint8_t flag)
 
 #ifdef CONFIG_NET
 	case MODE_R(F_SOCK):
-        	udata.u_count = sock_write(ino, flag);
+		udata.u_done = sock_write(ino, flag);
 		break;
 #endif
 	case MODE_R(F_PIPE):
@@ -386,3 +387,53 @@ void sync(void)
 	/* WRS: also call d_flush(dev) here for each dirty dev ? */
 	bufsync();		/* Clear buffer pool */
 }
+
+#ifdef CONFIG_BLOCK_SLEEP
+
+/* ptab is an array so won't exceed 64K so this crude cast works nicely */
+
+static void i_lock(inoptr i)
+{
+	if (i->lock == (uint16_t)udata.u_ptab)
+		panic(LOCKLOCK);
+	while(i->i_lock)
+		psleep_nosig(i);
+	i->i_lock = (uint16_t)udata.u_ptab;
+}
+
+static void i_unlock(inoptr i)
+{
+	i_islocked(i);
+	i->i_lock = 0;
+	pwakeup_nosig(i);
+}
+
+static void i_unlock_deref(inoptr i)
+{
+	i->i_lock = 0;
+	i_deref(i);
+}
+
+void i_islocked(inoptr i)
+{
+	if (i->lock != (uint16_t)udata.u_ptab)
+		panic(IUNLOCK);
+}
+
+inoptr n_open_lock(char *uname, inoptr *parent)
+{
+	inoptr i = n_open(uname, parent);
+	if (i)
+		i_lock(i);
+	return i;
+}
+
+inoptr getinode_lock(uint8_t uindex)
+{
+	inoptr i = getinode(uindex);
+	if (i)
+		i_lock(i);
+	return i;
+}
+
+#endif

@@ -14,14 +14,20 @@ struct display {
 #define FMT_COLOUR16	3
 #define FMT_TEXT	4	/* Text only mode */
 #define FMT_MONO_WB_TILE8 5	/* White on black 8x8 tiled (Amstrad PCW etc) */
+#define FMT_6PIXEL_128	6	/* 2x3 tiles from 128 (TRS80 style) */
 /* Those sufficiently funky */
 #define FMT_SPECTRUM	128
 #define FMT_VDP		129	/* VDP graphics engines */
+#define FMT_UBEE	130	/* Microbee 6545 modes */
   uint8_t hardware;
 #define HW_UNACCEL	1	/* Simple display */
-#define HW_VDP_9918	128	/* Not neccessarily MSX... */
+#define HW_VDP_9918A	128	/* Not neccessarily MSX... */
 #define HW_VDP_9938	129
 #define HW_TRS80GFX	130	/* TRS80 model 4 graphics board */
+#define HW_HRG1B	131	/* HRG1B for TRS80 and VidoeGenie */
+#define HW_MICROLABS	132	/* Microlabs Grafyx */
+#define HW_MICROLABS4	133	/* Microlabs Grafyx for Model 4 */
+#define HW_LOWE_LE18	134	/* Low Electronics LE-18 */
   uint16_t features;
 #define GFX_MAPPABLE	1	/* Can map into process memory */
 #define GFX_PALETTE	2	/* Has colour palette */

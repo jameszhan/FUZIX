@@ -1,7 +1,4 @@
-LINKER = sdcc
-FCC = ../../../../Library/tools/fcc -O2 -fsigned-char
-PLATFORM =
-#PLATFORM = -tzx128
+FCC = ../../../../Library/tools/fcc -m $(USERCPU) $(FUZIX_CCOPTS) -fsigned-char
 
 .SUFFIXES: .c .rel
 
@@ -12,24 +9,28 @@ SRCS  = args.c blok.c builtin.c cmd.c ctype.c error.c expand.c fault.c io.c \
 INCS  = brkincr.h ctype.h defs.h mac.h mode.h name.h stak.h sym.h timeout.h
 
 OBJS = $(SRCS:.c=.rel)
+FOBJS = $(patsubst %.c,fshbuild/%.rel, $(SRCS))
 
-LIBS = ../../../../Library/libs/syslib.lib
-
-all: sh
+all: fsh sh
 
 sh: $(OBJS)
-	$(FCC) $(PLATFORM) $(OBJS) -o $@
+	$(FCC) $(Z80_PLATFORM) $(OBJS) -o $@
+
+fsh: $(FOBJS)
+	$(FCC) $(Z80_PLATFORM) $(FOBJS) -o $@ -lreadline
 
 $(OBJS): $(INCS)
 
-.c.rel:
-	$(FCC) $(PLATFORM) -c $<
+$(FOBJS): $(INCS)
 
-%: %.rel
-	$(FCC) $(PLATFORM) $< -o $@
+$(OBJS): %.rel: %.c
+	$(FCC) $(Z80_PLATFORM) -c $<
+
+$(FOBJS): fshbuild/%.rel: %.c
+	$(FCC) $(Z80_PLATFORM) -c -DBUILD_FSH $< -o $@
 
 clean:
-	rm -f $(OBJS) sh $(SRCS:.c=) core *~ *.asm *.lst *.sym *.map *.noi *.lk *.ihx *.tmp *.bin
+	rm -f $(OBJS) fsh sh $(SRCS:.c=) core *~ *.asm *.lst *.sym *.map *.noi *.lk *.ihx *.tmp *.bin
 
 rmbak:
 	rm -f *~ core

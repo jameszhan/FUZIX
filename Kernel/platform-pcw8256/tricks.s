@@ -4,10 +4,10 @@
         .globl _newproc
         .globl _chksigs
         .globl _getproc
-        .globl _trap_monitor
+        .globl _platform_monitor
         .globl trap_illegal
         .globl _inint
-        .globl _switchout
+        .globl _platform_switchout
         .globl _switchin
         .globl _doexec
         .globl _dofork
@@ -16,6 +16,7 @@
 	.globl map_process
 	.globl map_kernel
 	.globl _swapper
+	.globl _int_disabled
 
         ; imported debug symbols
         .globl outstring, outde, outhl, outbc, outnewline, outchar, outcharhex
@@ -33,9 +34,8 @@
 ; FIXME: make sure we optimise the switch to self case higher up the stack!
 ; 
 ; This function can have no arguments or auto variables.
-_switchout:
+_platform_switchout:
         di
-        call _chksigs
         ; save machine state
 
 	ld a, #'O'
@@ -58,7 +58,7 @@ _switchout:
         call _switchin
 
         ; we should never get here
-        call _trap_monitor
+        call _platform_monitor
 
 badswitchmsg: .ascii "_switchin: FAIL"
             .db 13, 10, 0
@@ -135,6 +135,7 @@ not_swapped:
 
         ; enable interrupts, if the ISR isn't already running
         ld a, (U_DATA__U_ININTERRUPT)
+        ld (_int_disabled),a
         or a
         ret nz ; in ISR, leave interrupts off
         ei
@@ -144,7 +145,7 @@ switchinfail:
         ld hl, #badswitchmsg
         call outstring
 	; something went wrong and we didn't switch in what we asked for
-        jp _trap_monitor
+        jp _platform_monitor
 
 fork_proc_ptr: .dw 0 ; (C type is struct p_tab *) -- address of child process p_tab entry
 

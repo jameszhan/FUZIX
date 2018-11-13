@@ -21,15 +21,19 @@
 	    .globl map_kernel
 	    .globl map_process
 	    .globl map_process_always
-	    .globl map_save
+	    .globl map_kernel_di
+	    .globl map_process_di
+	    .globl map_process_always_di
+	    .globl map_save_kernel
 	    .globl map_restore
 	    .globl platform_interrupt_all
 	    .globl bank_switch_a
 	    .globl _curbank
+	    .globl _int_disabled
 
             ; exported debugging tools
-            .globl _trap_monitor
-            .globl _trap_reboot
+            .globl _platform_monitor
+            .globl _platform_reboot
             .globl outchar
 
             ; imported symbols
@@ -59,15 +63,18 @@
 ; -----------------------------------------------------------------------------
             .area _COMMONMEM
 
-_trap_monitor:
+_platform_monitor:
 	    ld a, #128
 	    out (29), a
 platform_interrupt_all:
 	    ret
 
-_trap_reboot:
+_platform_reboot:
 	    ld a, #1
 	    out (29), a
+
+_int_disabled:
+	    .db 1
 
             .area _CODE
 
@@ -149,7 +156,10 @@ _program_vectors:
 map_kernel:
 map_process:
 map_process_always:
-map_save:
+map_kernel_di:
+map_process_di:
+map_process_always_di:
+map_save_kernel:
 map_restore:
 	    ret	    
 

@@ -42,8 +42,9 @@
 	.import _platform_interrupt
 	.import platform_doexec
 	.import _inint
-	.import _trap_monitor
-	.import _switchout
+	.import _platform_monitor
+	.import _platform_switchout
+	.import _chksigs
 
 	.import push0
 	.import incaxy
@@ -626,6 +627,10 @@ ret_to_user:
 	lda	#1
 	sta	U_DATA__U_INSYS
 	;
+	;	Check for signals (the kstack is sane at this point)
+	;
+	jsr	_chksigs
+	;
 	;	Mark outselves as idle
 	;
 	ldx	U_DATA__U_PTAB
@@ -639,7 +644,7 @@ ret_to_user:
 	.i8
 	lda	U_DATA__U_PTAB
 	ldx	U_DATA__U_PTAB+1
-	jsr	_switchout
+	jsr	_platform_switchout
 	;
 	;	We will (one day maybe) pop back out here. It's not
 	;	guaranteed (we might be killed off)
@@ -833,7 +838,7 @@ itrap:
 	ldx	#>itrap_msg
 outfail:
 	jsr	outstring
-	jmp	_trap_monitor
+	jmp	_platform_monitor
 itrap_msg:
 	.byte	"itrap!", 0
 
@@ -909,7 +914,7 @@ nmi_handler:
 	lda #<nmi_trap
 	jsr outstring
 nmi_stop:
-	jmp _trap_monitor
+	jmp _platform_monitor
 nmi_trap:
 	.byte "NMI!", 0
 
@@ -917,7 +922,7 @@ emulation:
 	ldx #>emu_trap
 	lda #<emu_trap
 	jsr outstring
-	jmp _trap_monitor
+	jmp _platform_monitor
 emu_trap:
 	.byte "EM!", 0
 

@@ -87,9 +87,23 @@ int main(int argc, char *argv[])
     perror(argv[4]);
     exit(1);
   }
+
+  if (s__INITIALIZER + l__INITIALIZER > 65535 || s__INITIALIZED + l__INITIALIZER > 65535 || s__DATA > 65535) {
+    fprintf(stderr, "%s: too large for this model.\n", argv[0]);
+    /* FIXME: but for now it makes the build a hassle otherwise */
+    exit(0);
+  }
   memcpy(buf + s__INITIALIZED, buf + s__INITIALIZER, l__INITIALIZER);
 
-  bp = buf + progload + 10;
+  if (progload & 0xFF) {
+    fprintf(stderr, "%s: load address must be page aligned.\n", argv[0]);
+    exit(1);
+  }
+
+  bp = buf + progload + 7;
+  *bp++ = progload >> 8;
+  *bp++ = 0;
+  *bp++ = 0;
   *bp++ = s__INITIALIZED - progload;
   *bp++ = (s__INITIALIZED - progload) >> 8;
   *bp++ = s__DATA - s__INITIALIZED;

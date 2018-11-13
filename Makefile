@@ -2,6 +2,8 @@
 #
 # Useful values for general work
 #
+# amstradnc/nc100:	Amstrad NC100 (or emulator)
+# amstradnc/nc200:	Amstrad NC100 (or emulator)
 # coco2cart:	Tandy COCO2 or Dragon with 64K and IDE or SDC + cartridge flash
 #		(or modified xroar)
 # coco3:	Tandy COCO3 512K (or MAME)
@@ -10,12 +12,16 @@
 #		(or OpenMSX suitably configured)
 # mtx:		Memotech MTX512 with SDX (or MEMU emulator)
 # multicomp09:	Extended multicomp 6809
-# n8vem-mark4:	N8VEM Retrobrew Z180 board
-# nc100:	Amstrad NC100 (or emulator)
+# n8vem-mark4:	RBC/N8VEM Retrobrew Z180 board
 # p112:		DX Designs P112
+# rc2014:	RC2014 with 512K RAM/ROM and RTC
+# rc2014-tiny:	RC2014 with 64KK RAM, banked ROM and RTC
+# sbcv2:	RBC/N8VEM SBC v2
 # socz80:	Will Sowerbutt's FPGA SocZ80 or extended version
-# trs80:	TRS80 Model 4P with 128K RAM (some other TRS80 extension
+# trs80:	TRS80 Model 4/4D/4P with 128K RAM (some other TRS80 extension
 #		mappers have untested code in the tree)
+# trs80m1:	TRS80 Model I/III with suitable banker (also clones)
+# ubee:		Microbee
 # z80pack:	Z80Pack virtual Z80 platform
 # zeta-v2:	Zeta retrobrew SBC
 #
@@ -23,7 +29,7 @@
 #
 # v65:		Virtual platform for 6502 development
 # v65c816:	Virtual platform for 65c816 development
-# v68:		Virtual platfomr for 68000 development
+# v68:		Virtual platform for 68000 development
 
 TARGET=z80pack
 
@@ -43,8 +49,13 @@ PATH := /opt/fcc/bin:$(PATH)
 # (eg for 65c816 with 6502 user)
 export TARGET CPU USERCPU PATH
 
-all: stand ltools libs apps kernel
+# FUZIX_CCOPTS is the global CC optimization level
+ifeq ($(FUZIX_CCOPTS),)
+	FUZIX_CCOPTS = -O2
+endif
+export FUZIX_CCOPTS
 
+all: stand ltools libs apps kernel
 
 stand:
 	+(cd Standalone; $(MAKE))

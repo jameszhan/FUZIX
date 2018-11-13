@@ -6,7 +6,6 @@
 
 
 #include <devtty.h>
-
 /*
  *	Mini vt52 terminal emulation
  *
@@ -75,11 +74,12 @@
 
 static uint8_t vtmode;
 uint8_t vtattr;
-uint8_t vtink;
+uint8_t vtink = 7;
 uint8_t vtpaper;
 static signed char cursorx;
 static signed char cursory = VT_INITIAL_LINE;
 static signed char ncursory;
+static uint8_t cursorhide;
 static uint8_t vtpend;
 static uint8_t vtbusy;
 
@@ -104,35 +104,38 @@ static void cursor_fix(void)
 
 static void charout(unsigned char c)
 {
-	if (c == 7) {
-		do_beep();
-		return;
-	}
-	if (c == 8) {
-		cursorx--;
-		goto fix;
-	}
-	if (c == 9) {
-		do {
-			charout(' ');
-		} while (cursorx%8);
-		goto fix;
-	}
-	if (c == 10) {
-		cursory++;
-		goto fix;
-	}
-	if (c == 13) {
-		cursorx = 0;
-		return;
-	}
-	if (c == 0x1b) {
-		vtmode = 1;
-		return;
+	/* Fast path printable symbols */
+	if (c <= 0x1b) {
+		if (c == 7) {
+			do_beep();
+			return;
+		}
+		if (c == 8) {
+			cursorx--;
+			goto fix;
+		}
+		if (c == 9) {
+			do {
+				charout(' ');
+			} while (cursorx&7);
+			goto fix;
+		}
+		if (c == 10) {
+			cursory++;
+			goto fix;
+		}
+		if (c == 13) {
+			cursorx = 0;
+			return;
+		}
+		if (c == 0x1b) {
+			vtmode = 1;
+			return;
+		}
 	}
 	plot_char(cursory, cursorx, c);
 	cursorx++;
-      fix:
+fix:
 	cursor_fix();
 }
 
@@ -186,6 +189,15 @@ static int escout(unsigned char c)
 		clear_across(cursory, cursorx, VT_RIGHT - cursorx + 1);
 		return 0;
 	}
+	if (c == 'e') {
+		cursorhide = 0;
+		return 0;
+	}
+	if (c == 'f') {
+		cursorhide = 1;
+		cursor_disable();
+		return 0;
+	}
 	if (c == 'Y')
 		return 2;
 	if (c == 'a')
@@ -220,7 +232,8 @@ void vtoutput(unsigned char *p, unsigned int len)
 	}
 	vtbusy = 1;
 	irqrestore(irq);
-	cursor_off();
+	if (!cursorhide)
+		cursor_off();
 	/* FIXME: do we ever get called with len > 1, if not we could strip
 	   this right down */
 	do {
@@ -270,8 +283,8 @@ void vtoutput(unsigned char *p, unsigned int len)
 		len = 1;
 		/* Until we don't get interrupted */
 	} while(cq);
-
-	cursor_on(cursory, cursorx);
+	if (!cursorhide)
+		cursor_on(cursory, cursorx);
 	vtbusy = 0;
 }
 
@@ -332,6 +345,10 @@ int vt_inproc(uint8_t minor, unsigned char c)
 		tty_inproc(minor, 0xC2);
 		return tty_inproc(minor, 0xA5);
 	}
+	if (c == KEY_COPYRIGHT) {
+		tty_inproc(minor,0xC2);
+		return tty_inproc(minor, 0xA9);
+	}
 #endif
 	if (c > 0x9F) {
 		tty_inproc(minor, KEY_ESC);
@@ -343,6 +360,7 @@ int vt_inproc(uint8_t minor, unsigned char c)
 void vtinit(void)
 {
 	vtmode = 0;
+	vtattr_notify();
 	clear_lines(0, VT_BOTTOM + 1);
 	cursor_on(0, 0);
 }
@@ -356,6 +374,9 @@ void vt_save(struct vt_switch *vt)
 	vt->cursorx = cursorx;
 	vt->cursory = cursory;
 	vt->ncursory = ncursory;
+	vt->cursorhide = cursorhide;
+	vt->ink = vtink;
+	vt->paper = vtpaper;
 }
 
 void vt_load(struct vt_switch *vt)
@@ -365,6 +386,10 @@ void vt_load(struct vt_switch *vt)
 	cursorx = vt->cursorx;
 	cursory = vt->cursory;
 	ncursory = vt->ncursory;
+	cursorhide = vt->cursorhide;
+	vtink = vt->ink;
+        vtpaper = vt->paper;
+	vtattr_notify();
 }
 #endif
 
@@ -384,6 +409,11 @@ void cursor_off(void)
 {
 	if (cpos)
 		*cpos = csave;
+}
+
+/* Only needed for hardware cursors */
+void cursor_disable(void)
+{
 }
 
 void cursor_on(int8_t y, int8_t x)
@@ -414,16 +444,14 @@ void vtattr_notify(void)
 {
 }
 
-/* FIXME: these should use memmove */
-
 void scroll_up(void)
 {
-	memcpy(VT_BASE, VT_BASE + VT_WIDTH, VT_WIDTH * VT_BOTTOM);
+	memmove(VT_BASE, VT_BASE + VT_WIDTH, VT_WIDTH * VT_BOTTOM);
 }
 
 void scroll_down(void)
 {
-	memcpy(VT_BASE + VT_WIDTH, VT_BASE, VT_WIDTH * VT_BOTTOM);
+	memmove(VT_BASE + VT_WIDTH, VT_BASE, VT_WIDTH * VT_BOTTOM);
 }
 
 #endif

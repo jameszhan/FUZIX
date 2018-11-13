@@ -12,13 +12,13 @@
  *	- Give serious consideration to hiding cron/at in the daemon
  *	  to keep our background daemon count as low as we can
  *	- Ditto for syslogd
- *	- Debug telinit q handling
  *	(it's not turning into systemd honest)
  */
 
 #include <string.h>
 #include <signal.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <unistd.h>
 #include <fcntl.h>
@@ -45,7 +45,7 @@
 
 #define crlf()   write(1, "\n", 1)
 
-static void spawn_login(struct passwd *, const char *, const char *, const char *);
+static void spawn_login(struct passwd *, const char *, const char *, const char *, uint8_t);
 static pid_t getty(const char **, const char *);
 
 static struct utmp ut;
@@ -276,6 +276,11 @@ static void parse_initline(void)
 			sdata++;
 		return;
 	}
+	/* Handle a blank line gracefully */
+	if (*sdata == '\n') {
+		sdata++;
+		return;
+	}
 	/* We start with a line length then the id: bits. Don't write
 	 * the length yet - we may still be using that byte for input */
 	linelen = idata++;
@@ -365,7 +370,7 @@ static void parse_inittab(void)
 	uint8_t *p;
 	int i;
 	idata = inittab = sdata;
-	while (sdata < sdata_end)
+	while (sdata && sdata < sdata_end)
 		parse_initline();
 	/* Allocate space for the control arrays */
 	initpid = (struct initpid *) idata;
@@ -529,6 +534,8 @@ static void do_for_runlevel(uint8_t newmask, int op)
 		if (!(p[3] & newmask))
 			goto next;
 		if ((p[4] & INIT_OPMASK) == op) {
+			if (!p[5])
+				goto next;
 			/* Already running ? */
 			if (op == INIT_RESPAWN && t->pid)
 				goto next;
@@ -659,7 +666,7 @@ static void envset(const char *a, const char *b)
 static struct termios tref = {
 	BRKINT | ICRNL,
 	OPOST | ONLCR,
-	CREAD | HUPCL,
+	CS8 | CREAD | HUPCL,
 	ISIG | ICANON | ECHO | ECHOE | ECHOK | IEXTEN,
 	{CTRL('D'), 0, CTRL('H'), CTRL('C'),
 	 CTRL('U'), CTRL('\\'), CTRL('Q'), CTRL('S'),
@@ -716,6 +723,7 @@ static pid_t getty(const char **argv, const char *id)
 	const char *host = "";
 	char *p, buf[50], salt[3];
 	char hn[64];
+	uint8_t console = 0;
 
 	gethostname(hn, sizeof(hn));
 
@@ -755,6 +763,9 @@ static pid_t getty(const char **argv, const char *id)
 					if ((issue = *++argv) == NULL)
 						usage();
 					break;
+				case 'c':
+					console = 1;
+					break;
 				default:
 					usage();
 				}
@@ -772,6 +783,9 @@ static pid_t getty(const char **argv, const char *id)
 			fdtty = open(argv[0], O_RDWR);
 			if (fdtty < 0)
 				return -1;
+
+			if (fchown(fdtty, 0, 0))
+				putstr("getty: can not reset owner of tty\n");
 
 			/* here we are inside child's context of execution */
 			envset("PATH", "/bin:/usr/bin");
@@ -823,6 +837,9 @@ static pid_t getty(const char **argv, const char *id)
 				if ((p = strchr(buf, '\n')) != NULL)
 					*p = '\0';	/* strip newline */
 
+				if (*buf == 0)
+					continue;
+
 				pwd = getpwnam(buf);
 
 				if (pwd == NULL || *pwd->pw_passwd)
@@ -837,7 +854,7 @@ static pid_t getty(const char **argv, const char *id)
 						pr = "";
 					}
 					if (strcmp(pr, pwd->pw_passwd) == 0)
-						spawn_login(pwd, argv[0], id, host);
+						spawn_login(pwd, argv[0], id, host, console);
 				} else /* So you can't tell by the delay time */
 					crypt(p, "ZZ");
 
@@ -853,7 +870,7 @@ static pid_t getty(const char **argv, const char *id)
 
 static char *argp[] = { "sh", NULL };
 
-static void spawn_login(struct passwd *pwd, const char *tty, const char *id, const char *host)
+static void spawn_login(struct passwd *pwd, const char *tty, const char *id, const char *host, uint8_t console)
 {
 	char *p, buf[50];
 
@@ -872,6 +889,15 @@ static void spawn_login(struct passwd *pwd, const char *tty, const char *id, con
 
 	/* We don't care if initgroups fails - it only grants extra rights */
 	initgroups(pwd->pw_name, pwd->pw_gid);
+
+	/* change owner of tty device */
+	if (fchown(0, pwd->pw_uid, pwd->pw_gid))
+		putstr("login: unable to change owner of controlling tty\n");
+	if (console) {
+		/* Claim console associated files */
+		chown("/dev/input", pwd->pw_uid, pwd->pw_gid);
+		chmod("/dev/input", 0600);
+	}
 
 	/* But we do care if these fail! */
 	if (setgid(pwd->pw_gid) == -1 ||

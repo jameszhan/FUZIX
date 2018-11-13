@@ -1,22 +1,42 @@
 TRS80 Model 4/4P
 (or right now more accurately sdltrs/xtrs)
 
-Emulator Bugs:
-	The emulator is horribly insecure, it's default is to allow all
-	sorts of direct access to things. Even if you turn this off I've
-	had it segfault with FUZIX bugs which suggests its not too secure.
+This port supports the following configurations currently
 
+	TRS80 Model 4/4P (including gate array floppy disk workarounds) with
+	128K of RAM fitted
+	Options:
+		Floppy Disk (somewhat basic support, no format tool yet)
+		Hard Disk (Tandy compatible)
+		Dave Huffman style banked memory (on Port 0x94)
+	In Progress:
+		Tandy hi-res graphics
+		Orchestra 90 sound card
+	Planned:
+		Micro Labs Grafyx
+		Alpha Joystick
+		IDE adapter
+		Alpha Technologies SuperMem (on port 0x43)
+		Anitek HyperMem (on port 0x90)
+	Not Supported:
+		XLR8R - to do it well is a different port
+		M3SE (except as far as it's compatibility features go)
+
+Requres:
+	Patched xtrs from Fuzix git tree
+
+Emulator Bugs:
 	Repeating instructions like LDIR appear to be misemulated. LDIR
 	is performed an emulated block copy, not as an iterated LDI. The
 	real processor actually implements LDIR as  "LDI, if not done
 	PC -= 2". FUZIX doesn't do any overlapped LDIR tricks so shouldn't
 	be affected.
 
-	The interrupt flags are misemulated. A patch for this is in the
-	Fuzix tree and is needed to run Fuzix on xtrs/sdltrs
+	Other bugs in RETI, IFF handling etc have been fixed in my xtrs
+	tree.
 
 Requirements: 
-	128K RAM fitted
+	128K or banked RAM fitted
 	Hard disk drive (will be used for swap), or a suitable memory
 	expander board could be used with a bit of tweaking (or both!)
 	(The hard disk code should work with the Lo-tech IDE adapter but
@@ -49,7 +69,7 @@ Drivers:
 	including finding where 'swap' lives
 
 Adding Support For Other Banked RAM:
-	See trs80.s, and the various map_* functions. These can be extended
+	See trs80-map*s, and the various map_* functions. These can be extended
 	to use U_DATA__U_PAGE+1 to carry a second byte of data. The
 	main.c for the platform sets up the pagemaps as a 16bit value
 	which currently is just the opreg bits for the two banks.
@@ -60,64 +80,47 @@ Adding Support For Other Banked RAM:
 	Finally up MAX_BANKS in platform/config.h accordingly.
 
 
-Setting It Up
+Setting It Up (xtrs from EtchedPixels github)
+
+	This needs patches currently in progress
 
 	# Tool to make disk images
 	make tools/makejv3
 	# Double density single sided 40 track boot disk
-	tools/makejv3 dd40s /dev/zero mydisk.jv3
+	tools/makejv3 -t dd40s disk4p-0
 	# Build kernel and boot block (edit Makefile, set target then)
 	make
 	# Add pieces to the disk (boot block in sector 0, kernel at end)
-	dd if=zout/trs80load.cim of=mydisk.jv3 bs=1 seek=8960 conv=notrunc
-	dd if=fuzix.bin of=mydisk.jv3 bs=1 seek=142336 conv=notrunc
+	dd if=zout/trs80load.cim of=disk4p-0 bs=1 seek=8960 conv=notrunc
+	dd if=fuzix.bin of=disk4p-0 bs=1 seek=142336 conv=notrunc
 	# Once we get that far you can also put a filesystem in the lower
 	# blocks
 	#
-	sdltrs -model 4p -emtsafe -disk0 mydisk.jv3
-	#
-	# and remember to mark the fd volume as writeable
+	xtrs -model 4p
 
 To set up for hard disk, create a hard disk with the xtrs tools and
 
-	mkdisk -h hard4-0
+	mkdisk -h hard4p-0
 	# This assumes the default disk size
 	cd Standalone/filesystem-src
 	./build-filesystem trs80.hd 256 21760
-	dd if=trs80.hd of=hard4-0 bs=256 seek=1 conv=notrunc
-	tools/trslabel hard4-0
+	dd if=trs80.hd of=hard4p-0 bs=256 seek=1 conv=notrunc
+	tools/trslabel hard4p-0
 	#
-	sdltrs -model 4p -emtsafe -disk0 mydisk.jv3 -hard0 hard4-0
+	xtrs -model 4p
 
 
 You will still need a boot floppy at this point but just boot with device
 0 (or hit return). Swap is configured to be on the end of the hard disk
 
-
-
 Banking Models
 
 Currently Supported:
 	TRS80 model 4 with inbuilt memory bank switching
-
-In Progress:
 	Port 0x94 modification to add extra internal RAM to a 4 and 4P
 
-Not Yet Started:
-	"Selector" for Model 1. Port 31 allows memory reshuffling away from
-the model 1 default. Either the upper or lower 32K is switchable but not
-both at once. bits 4/5 control the selection between a further 4 32K banks.
-Also needs model 1 support adding of course.
-
-
 Documentation Needed:
-	Various other RAM banking boards (AlphaTech and the like)
+	Various other RAM banking boards (AlphaTech for Model 4P and the like)
 
 	HD64180 mods with more RAM (these are I suspect almost a different port)
 	(XLR8R etc)
-
-Not Usable:
-	Various model 1 interfaces that provide 64K RAM or near 64K RAM. Not
-enough for Fuzix on Z80. Possibly enough for UZI with a hard disc.
-
-	LNW80 model II (same problem - 64K only)

@@ -23,7 +23,24 @@ struct  s_queue  ttyinq[NUM_DEV_TTY+1] = {       /* ttyinq[0] is never used */
 #endif
 };
 
-void tty_setup(uint8_t minor)
+static tcflag_t console_mask[4] = {
+	_ISYS,
+	_OSYS,
+	_CSYS,
+	_LSYS
+};
+
+/* TODO: stty support for  the Z180 ports */
+tcflag_t *termios_mask[NUM_DEV_TTY + 1] = {
+	NULL,
+	console_mask,
+	console_mask,
+#ifdef CONFIG_PROPIO2
+	console_mask
+#endif
+};
+
+void tty_setup(uint8_t minor, uint8_t flags)
 {
     minor;
 }
@@ -78,6 +95,10 @@ void tty_putc(uint8_t minor, unsigned char c)
 void tty_sleeping(uint8_t minor)
 {
     minor;
+}
+
+void tty_data_consumed(uint8_t minor)
+{
 }
 
 ttyready_t tty_writeready(uint8_t minor)

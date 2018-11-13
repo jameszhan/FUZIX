@@ -3,9 +3,8 @@
 #	do endian swapping if building on PC for 6809
 #
 
-FCC = fcc
+FCC = fcc -m$(USERCPU)
 FCCOPTS = -O2 --nostdio
-PLATFORM =
 
 SRC = advent.c adventdb.c database.c english.c itverb.c lib.c saveadv.c \
       turn.c verb.c
@@ -22,10 +21,10 @@ advgen: advgen.c
 	cc advgen.c -o ./advgen
 	
 .c.rel:
-	$(FCC) $(PLATFORM) $(FCCOPTS) -c $<
+	$(FCC) $(Z80_PLATFORM) $(FCCOPTS) -c $<
 
 advent: $(OBJ)
-	$(FCC) $(PLATFORM) $(FCCOPTS) -o $@ $(OBJ)
+	$(FCC) $(Z80_PLATFORM) $(FCCOPTS) -o $@ $(OBJ)
 
 clean:
 	rm -f advent advent.db advgen *.rel *.asm *.lst core *.sym *.map *.noi *.lk *.ihx *.tmp *.bin

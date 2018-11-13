@@ -1,7 +1,7 @@
 TARGET_LIST = $(wildcard platform-*)
 
-export VERSION = "0.1"
-export SUBVERSION = "ac1"
+export VERSION = "0.3pre1"
+export SUBVERSION = ""
 export ROOT_DIR
 
 UNAME_S := $(shell uname -s)
@@ -56,9 +56,9 @@ CS5SRCS = syscall_exec$(BITS).c
 #	Drop some bits into CODE3 so the 6502 banks fit nicely. May well
 #	need to do this on Z80 as well
 #
-C3SRCS = devsys.c mm.c swap.c usermem.c timer.c audio.c level2.c
+C3SRCS = devsys.c mm.c swap.c usermem.c timer.c audio.c level2.c devinput.c
 CVIDEOSRCS = vt.c
-CFONTSRCS = font4x6.c font6x8.c font8x8.c
+CFONTSRCS = font4x6.c font6x8.c font8x8.c font8x8_exp2.c
 
 
 ASRCS =  lowlevel-$(CPU)$(BANKED)$(ASMEXT) usermem_std-$(CPU)$(BANKED)$(ASMEXT)
@@ -151,6 +151,9 @@ $(AOBJS): %$(BINEXT): %$(ASMEXT)
 version.c: tools/makeversion
 	tools/makeversion $(VERSION) $(SUBVERSION) $(TARGET)
 
+font8x8_exp2.c: font8x8.c tools/fontexpand
+	tools/fontexpand <font8x8.c >font8x8_exp2.c
+
 tools/makeversion: tools/makeversion.c
 
 tools/filesizes: tools/filesizes.c
@@ -161,6 +164,12 @@ tools/make4x6: tools/make4x6.c
 
 tools/bbc: tools/bbc.c
 
+tools/makejv3: tools/makejv3.c
+
+tools/trslabel: tools/trslabel.c
+
+tools/fontexpand: tools/fontexpand.c
+
 font4x6.c: tools/make4x6
 	tools/make4x6 >font4x6.c
 
@@ -170,7 +179,7 @@ clean:
 	rm -f fuzix.ihx common.ihx common.bin relocs.dat core *~ include/*~ version.c tools/make4x6
 	rm -f tools/analysemap tools/memhogs tools/binman tools/bihx tools/binmunge tools/bintomdv
 	rm -f tools/bin2sna tools/bin2z80 tools/chkmdv tools/decbdragon tools/decb-image hogs.txt
-	rm -f hogs.txt.old tools/*~ version.c include/sysinfoblk.h tools/makeversion
+	rm -f hogs.txt.old tools/*~ version.c include/sysinfoblk.h tools/makeversion tools/trslabel
 	rm -f *.rel *.lst *.sym *.o
 	+$(MAKE) -C platform-$(TARGET) clean
 	+$(MAKE) -C tools/bankld clean

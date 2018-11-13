@@ -50,6 +50,7 @@
 
 /* We have a DS1302, we can read the time of day from it */
 #define CONFIG_RTC
+#define CONFIG_RTC_FULL
 #define CONFIG_RTC_INTERVAL 30 /* deciseconds between reading RTC seconds counter */
 
 /* Memory backed devices */
@@ -65,3 +66,5 @@
 
 /* We have the P112 floppy controller */
 #define CONFIG_P112_FLOPPY
+
+#define platform_copyright()

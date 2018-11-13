@@ -26,6 +26,9 @@
 /****************************************************************************/
 
 #ifdef IDE_REG_CONTROL
+
+#define IDE_HAS_RESET
+
 static void devide_delay(void)
 {
     timer_t timeout;
@@ -68,16 +71,18 @@ void devide_init_drive(uint8_t drive)
     kprintf("IDE drive %d: ", drive);
 
 #ifdef IDE_8BIT_ONLY
+    if (IDE_IS_8BIT(drive)) {
     /* set 8-bit mode -- mostly only supported by CF cards */
-    if (!devide_wait(IDE_STATUS_READY))
-        goto out;
+        if (!devide_wait(IDE_STATUS_READY))
+            goto out;
 
-    devide_writeb(ide_reg_devhead, select);
-    if (!devide_wait(IDE_STATUS_READY))
-        goto out;
+        devide_writeb(ide_reg_devhead, select);
+        if (!devide_wait(IDE_STATUS_READY))
+            goto out;
 
-    devide_writeb(ide_reg_features, 0x01); /* Enable 8-bit PIO transfer mode (CFA feature set only) */
-    devide_writeb(ide_reg_command, IDE_CMD_SET_FEATURES);
+        devide_writeb(ide_reg_features, 0x01); /* Enable 8-bit PIO transfer mode (CFA feature set only) */
+        devide_writeb(ide_reg_command, IDE_CMD_SET_FEATURES);
+    }
 #endif
 
     /* confirm drive has LBA support */
@@ -110,7 +115,7 @@ void devide_init_drive(uint8_t drive)
 
     blk->transfer = devide_transfer_sector;
     blk->flush = devide_flush_cache;
-    blk->driver_data = drive & DRIVE_NR_MASK;
+    blk->driver_data = drive & IDE_DRIVE_NR_MASK;
 
     if( !(((uint16_t*)buffer)[82] == 0x0000 && ((uint16_t*)buffer)[83] == 0x0000) ||
          (((uint16_t*)buffer)[82] == 0xFFFF && ((uint16_t*)buffer)[83] == 0xFFFF) ){
@@ -146,7 +151,7 @@ void devide_init(void)
 {
     uint8_t d;
 
-#ifdef IDE_REG_CONTROL
+#ifdef IDE_HAS_RESET
     devide_reset();
 #endif
 

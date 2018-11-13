@@ -1,8 +1,8 @@
 .SUFFIXES: .c .rel
 
-CC = fcc
+CC = fcc -m$(USERCPU) $(Z80_PLATFORM)
 CFLAGS = -DTINY
-COPT = -O2
+COPT = $(FUZIX_CCOPTS)
 
 OBJS = initials.rel data.rel error.rel expr.rel function.rel gen.rel io.rel \
        lex.rel main.rel outstack.rel preproc.rel primary.rel stmt.rel \
@@ -40,8 +40,7 @@ copt:	$(OBJ_COPT)
 cc:	$(OBJ_CC)
 	$(CC) -o cc $(OBJ_CC)
 
-clean:
-	rm -f $(OBJ) scc8080 sccz80 scc6801 scc6809 *.rel *~
+
 
 .c.rel:
 	$(CC) $(COPT) $(CFLAGS) -c $< -o $@
@@ -49,4 +48,4 @@ clean:
 $(OBJS_ALL) : $(INC)
 
 clean:
-	rm -f *~ *.rel *.asm *.lst *.sym *.o *.map *.noi *.bin *.lk
+	rm -f scc8080 sccz80 scc6801 scc6809 copt *~ *.rel *.asm *.lst *.sym *.o *.map *.noi *.bin *.lk

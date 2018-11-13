@@ -71,12 +71,21 @@ struct blk {
 	BLKPTR word;
 };
 
+/* We need a real line worth of buffering for fsh to work nicely and as it's
+   a bigger target we can afford it */
+#ifdef BUILD_FSH
+#define BUFSIZ 256
+#define BUFN POS
+#else
 #define	BUFSIZ	64
+#define BUFN CHAR
+#endif
+
 struct fileblk {
 	UFD fdes;
 	POS flin;
 	BOOL feof;
-	CHAR fsiz;
+	BUFN fsiz;
 	char * fnxt;
 	char * fend;
 	char * *feval;
@@ -89,7 +98,7 @@ struct filehdr {
 	UFD fdes;
 	POS flin;
 	BOOL feof;
-	CHAR fsiz;
+	BUFN fsiz;
 	char * fnxt;
 	char * fend;
 	char * *feval;

@@ -58,7 +58,7 @@ typedef struct keytable_t {
 
 int done;
 int row, col;
-int indexp, page, epage;
+int indexp, page, epage;	/* Limits us to 32K buffer.. look at uint16?*/
 int input;
 int repeat;
 char buf[BUF];
@@ -168,7 +168,6 @@ int bottom(void);
 int delete(void);
 int delete_line(void);
 int down(void);
-int file(void);
 int insert(void);
 int insert_mode(void);
 int insert_before(void);
@@ -203,6 +202,12 @@ int do_goto(void);
 int do_del(void);
 int do_change(void);
 int changeend(void);
+int pagetop(void);
+int pagemiddle(void);
+int pagebottom(void);
+int swapchars(void);
+int bracket(void);
+int colon_mode(void);
 
 #undef CTRL
 #define CTRL(x)                ((x) & 0x1f)
@@ -214,14 +219,13 @@ int changeend(void);
  *	CTRL-F/CTRL-B	implemented but not exactly as vi
  *	W and S		word skip with punctuation
  *	[] and ()	setence and paragraph skip
- *	H M L		top/niddle/bottom of screen
  *	R		replace mode
- *	t		swap two characters
  *	cw/ce		change word variants
  *	s		substitute
+ *	/ and ?		search forward/back
+ *	n/N		next search forward/back
  *	u		undo
  *	dw,de		delete word variants
- *	%		move to associated bracket pair
  *	.		repeat last text changing command
  *
  *	All : functionality
@@ -267,8 +271,8 @@ keytable_t table[] = {
         { 'X', 0, delete_left },
         { 'o', 0, open_after },
         { 'O', 0, open_before },
-        { 'W', NORPT, file },
         { 'R', NORPT, redraw },
+        { CTRL('L'), NORPT, redraw },
         { 'Q', NORPT, quit },
         { 'Z', NORPT, zz },
         { 'D', 0, delete_line },	/* Should also be dd */
@@ -277,9 +281,14 @@ keytable_t table[] = {
         { 'r', 0, replace },
         { 'F', NORPT, findleft },
         { 'f', NORPT, findright },
+        { 'H', NORPT, pagetop },
+        { 'L', NORPT, pagebottom },
+        { 'M', NORPT, pagemiddle },
         { 'd', 0, do_del },
         { 'c', 0, do_change },
         { 'C', 0, changeend },
+        { 't', 0, swapchars },
+        { '%', 0, bracket },
         { '0', KEEPRPT|USERPT, digit },
         { '1', KEEPRPT|USERPT, digit },
         { '2', KEEPRPT|USERPT, digit },
@@ -290,11 +299,12 @@ keytable_t table[] = {
         { '7', KEEPRPT|USERPT, digit },
         { '8', KEEPRPT|USERPT, digit },
         { '9', KEEPRPT|USERPT, digit },
+        { ':', NORPT, colon_mode },
         { 0, 0, noop }
 };
 
 
-void beep(void)
+int dobeep(void)
 {
         write(1, "\007", 1);
 }
@@ -483,6 +493,49 @@ int pgdown_half(void)
         return 0;
 }
 
+int pagetop(void)
+{
+        int y = row;
+        while(y--)
+                up();
+        return 0;
+}
+
+int pagemiddle(void)
+{
+        int y = row;
+        int t = LINES/2;
+        while(y < t) {
+                down();
+                y++;
+        }
+        while(y-- > t)
+                up();
+        return 0;
+}
+
+int pagebottom(void)
+{
+        int y = row;
+        while(y++ < LINES - 1)
+                down();
+        return 0;
+}
+
+int swapchars(void)
+{
+        if (indexp) {
+                char *p = ptr(indexp);
+                char *q = ptr(indexp-1);
+                char x = *p;
+                *p = *q;
+                *q = x;
+                modified = 1;
+                return 0;
+        }
+        return 1;
+}
+
 int wleft(void)
 {
         char *p;
@@ -546,6 +599,61 @@ int findright(void)
         return fright(c);
 }
 
+/* Does it make sense to merge these with fleft/fright ? */
+int findpair(char in, char out, char dir)
+{
+        unsigned int depth = 0;
+
+        while(1) {
+                char *p = ptr(indexp);
+                char c = *p;
+                if (c == in)
+                        depth++;
+                if (c == out) {
+                        if (--depth == 0)
+                                return 0;
+                }
+                if (dir == -1) {
+                        if (indexp == 0)
+                                return 1;
+                        indexp--;
+                } else {
+                        if (p == ebuf)
+                                return 1;
+                        indexp++;
+                }
+        }
+}
+
+
+/* Real vi doesn't match < > but it's two bytes cost to add and really rather
+   useful */
+static const char brackettab[] = "([{<)]}>";
+
+int bracket(void)
+{
+        char c = *ptr(indexp);
+        int ip = indexp;
+        char *x = strchr(brackettab, c);
+
+        if (x == NULL)
+                return 1;
+
+        if (x < brackettab + 4) {
+                if (findpair(*x, x[4], 1) == 0)
+                        return 0;
+                indexp = ip;
+                dobeep();
+                return 1;
+        } else {
+                if (findpair(*x, x[-4], -1) == 0)
+                        return 0;
+                indexp = ip;
+                dobeep();
+                return 1;
+        }
+}
+
 /* Do we need a filter on this and insert_mode ? */
 int insertch(char ch)
 {
@@ -606,7 +714,7 @@ int append_mode(void)
 int append_end(void)
 {
         lnend();
-        return append_mode();
+        return insert_mode();
 }
 
 int replace(void)
@@ -620,12 +728,18 @@ int replace(void)
         return 0;
 }
 
+static int do_delete_line(void)
+{
+        movegap();
+        while(egap < ebuf - 1 && *egap != '\n')
+                indexp = pos(++egap);
+        return 0;
+}
+
 int delete_line(void)
 {
         lnbegin();
-        while(egap < ebuf - 1 && egap[1] != '\n')
-                indexp = pos(++egap);
-        return 0;
+        do_delete_line();
 }
 
 int backsp(void)
@@ -661,15 +775,14 @@ int do_del(void)
 {
         int c = getch();
         if (c == '$')	/* Delete to end */
-                return delete_line();
+                return do_delete_line();
         else if (c == 'd') {
-                lnbegin();
                 return delete_line();
         } else if (c == '^') {
                 while(indexp && *ptr(indexp) != '\n' && !delete_left());
                 return 0;
         } else {
-                beep();
+                dobeep();
                 return 1;
         }
         /* TODO dw and de */
@@ -713,13 +826,6 @@ int open_after(void)
         return 0;
 }
 
-int file(void)
-{
-        if (!save(filename))
-                save(HUP);
-        return 0;
-}
-
 int save(char *fn)
 {
         FILE *fp;
@@ -739,19 +845,24 @@ int save(char *fn)
         return (ok);
 }
 
-int zz(void)
+int save_done(void)
 {
-        int c = getch();
-        if (c != 'Z' && c != 'z') {
-                beep();
-                return 0;
-        }
         /* Check if changed ? */
         if (!save(filename))
                 warning(strerror(errno));
         else
-                exit(0);
+                done = 1;
         return 1;
+}
+
+int zz(void)
+{
+        int c = getch();
+        if (c != 'Z' && c != 'z') {
+                dobeep();
+                return 0;
+        }
+        return save_done();
 }
 
 int noop(void)
@@ -759,6 +870,73 @@ int noop(void)
         return 0;
 }
 
+/*
+ *	We need to emulate a minimal subset of commands people habitually use
+ *
+ *	:q :q!
+ *	:x
+ *
+ *	:w :w! (with path)
+ *	:r (maybe)
+ *	:number
+ *	:s/
+ *	:e file
+ *	:!shell
+ *	!!
+ */
+static void colon_process(char *buf)
+{
+        if (*buf == 'q') {
+                if (!modified || buf[1] == '!')
+                        done = 1;
+                else
+                        warning("No write since last change.");
+                return;
+        }
+        if (*buf == 'x') {
+                save_done();
+                return;
+        }
+        warning("unknown : command.");
+}	
+
+int colon_mode(void)
+{
+        char buf[132];
+        char *bp = buf;
+        int c;
+
+        mvaddstr(LINES-1, 0, ":");
+        clrtoeol();
+        refresh();
+        *bp = 0;
+        while(1) {
+                c = getch();
+                if (c < 0 || c > 255 || c == 27)
+                        break;
+                if (c == '\n' || c == '\r') {
+                        colon_process(buf);
+                        break;
+                }
+                if (c == 8 || c == 127) {
+                        if(bp != buf)
+                                *--bp = 0;
+                } else {
+                        if (bp < buf + 130 && bp < buf + COLS - 2) {
+                                *bp++ = c;
+                                *bp = 0;
+                        }
+                }
+                mvaddstr(LINES-1, 1, buf);
+                clrtoeol();
+                refresh();
+        }
+        move(LINES-1, 0);
+        clrtoeol();
+        display();
+        return 0;
+}
+        
 void warning(const char *p)
 {
         /* This sort of assumes the error fits one line */
@@ -766,7 +944,7 @@ void warning(const char *p)
         mvaddstr(LINES-1, 0, p);
         clrtoeol();
         refresh();
-        beep();
+        dobeep();
         getch();
         display();
 }
@@ -836,7 +1014,6 @@ int main(int argc, char *argv[])
         raw();
         noecho();
         idlok(stdscr, 1);
-        keypad(stdscr, 1);
         fp = fopen(filename = *++argv, "r");
         if (fp != NULL) {
                 gap += fread(buf, sizeof (char), (size_t) BUF, fp);

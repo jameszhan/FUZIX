@@ -13,9 +13,11 @@ CPU_Z180	.equ	Z80_TYPE-2
 .endif
 
         ; imported symbols
+        .globl map_buffers
         .globl map_kernel
         .globl map_process_always
         .globl _devfd_dtbl
+	.globl _platform_idle
 
         ; exported sybols
         .globl _devfd_init
@@ -58,7 +60,7 @@ CPU_Z180	.equ	Z80_TYPE-2
 ;    FDC_DATA   - Data/Command Register         (Read/Write)
 ;                               (Byte Writes/Reads)
 ;
-;    FDC_CCR    - Data Rate Register (Write)
+;    FDC_CCR    - Data Rate Register (Write, not present on older FDCs)
 ;       7 6 5 4 3 2 1 0                         (Write)
 ;       | | | | | | +-+-- 00=500 kb/s, RPM/LC Hi, 01=250/300 kb/s (RPM/LC Lo)
 ;       | | | | | |       10=250 kb/s, RPM/LC Lo, 11=1000 kb/s (RPM/LC Hi/Lo)
@@ -98,6 +100,7 @@ _devfd_init:
         POP     BC              ;  minor (in C)
         PUSH    BC              ;   Keep on Stack for Exit
         PUSH    HL
+	PUSH	IY		; Must be saved for the C caller
         LD      A,C
         LD      (drive),A       ; Save Desired Device
         CP      #4              ; Legal?
@@ -122,9 +125,11 @@ indel2: DJNZ    indel2          ;    (settle, B already =0)
         JR      NZ,NoDrv        ; ..Error if it failed
         LD      oFLG(IY), #1    ; Mark drive as active
         LD      HL,#0           ; Load Ok Status
+	POP	IY
         RET
 
 NoDrv:  LD      HL,#0xFFFF      ; Set Error Status
+	POP	IY
         RET
 
 ;-------------------------------------------------------------
@@ -148,6 +153,9 @@ _devfd_write:
         POP     BC              ;  minor (->C)
         PUSH    BC              ;   Keep on Stack for Exit
         PUSH    HL
+
+	PUSH	IY
+
         LD      A,C
         LD      (drive),A       ; Save Desired Device
 
@@ -196,6 +204,7 @@ Rwf2:   LD      A,(rwRtry)      ; Get retry count
         OR      #0xFF           ; Else show Error
 FhdrX:  LD      L,A
         LD      H,#0
+	POP	IY
         RET                     ;   and Exit
 
 ;-------------------------------------------------------------
@@ -322,7 +331,6 @@ Setup:  LD      A,(drive)
         LD      A,(_devfd_sector)
         ADD     A,oSEC1(IY)     ;    Offset Sector # (base 0) by 1st Sector #
         LD      (sect),A        ;     set in Comnd Blk
-
         XOR A                   ;  (Preset Hi 500 kbps, 3.5 & 5.25" Rate)
         BIT     7,oFMT(IY)      ; Hi (500 kbps) Speed?
         JR      NZ,StSiz0       ; ..jump if Hi-Density/Speed to Set if Yes
@@ -335,7 +343,10 @@ Setup:  LD      A,(drive)
         LD      A,#0x02         ;  (Prepare for 250 kbps)
         JR      Z,StSiz0        ; ..jump if No
         LD      A,#0x01         ; Else set to 300 kbps (@360 rpm = 250kbps)
-StSiz0: OUT     (FDC_CCR),A     ; Set Rate in FDC Reg
+StSiz0:
+.ifne FDC_CCR
+	OUT     (FDC_CCR),A     ; Set Rate in FDC Reg
+.endif
         LD      D,A             ;   preserve Rate bits
 .ifeq CPU_Z180
         IN0     A,(0x1F)        ; Read Z80182 CPU Cntrl Reg (B7=1 if Hi Speed)
@@ -471,7 +482,16 @@ MtrSet: ; now B contains the relevant motor bit we need to be set in the FDC DOR
         LD      A,(HL)          ;    Get value
         LD      (mtm),A         ;     to GP Counter
         EI                      ; Ensure Ints are ABSOLUTELY Active..
-MotoLp: LD      A,(mtm)         ;  ..otherwise, loop never times out!
+;
+;	FIXME: this is wrong on two levels
+;	#1 We shouldn't rely upon an IRQ (we can busy wait too)
+;	#2 The timers are set in 1/20ths but it's not clear everyone is
+;	using 1/20ths for the IRQ call (See p112)
+;
+MotoLp:	PUSH	DE
+	CALL	_platform_idle
+	POP	DE
+	LD      A,(mtm)         ;  ..otherwise, loop never times out!
         OR      A               ; Up to Speed?
         JR      NZ,MotoLp       ; ..loop if Not
         DI                      ; No Ints now..
@@ -601,8 +621,12 @@ FdcXit:
 ; inner section of FdCmd routine, has to touch buffers etc
 FdCmdXfer:
         BIT     0,D             ; Buffer in user memory?
-        CALL    NZ, map_process_always
-
+	JR	Z,  kernxfer
+        CALL    map_process_always
+	JR 	doxfer
+kernxfer:
+	CALL	map_buffers
+doxfer:
         ; send the command (length is in B, command is in C)
         PUSH    HL              ; save pointer for possible Transfer
         LD      HL,#comnd       ; Point to Command Block
@@ -626,8 +650,6 @@ FdCiR3: AND     #0x20           ; are we still in the Execution Phase? (1 cycle 
 
 ; tidy up and return
 FdCmdXferDone:
-        BIT     0,D             ; Buffer in user memory?
-        RET     Z               ; done if not
         JP      map_kernel      ; else remap kernel and return
 
 ;-------------------------------------------------------------

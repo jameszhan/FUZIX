@@ -181,8 +181,8 @@ void code_reloc(uint8_t sbank, uint16_t ptr, uint8_t dbank)
       buf[sbank][ptr] = da >> 8;
       break;
     default:
-      fprintf(stderr, "Bad relocation in code %04X: %02X\n",
-        ptr-1, buf[sbank][ptr-1]);
+      fprintf(stderr, "Bad relocation in code (%02X)%04X: %02X\n",
+        sbank, ptr-1, buf[sbank][ptr-1]);
   }
 }
 
@@ -219,14 +219,18 @@ int stub_code(char *name)
     return 1;
   if(strcmp(name, "_COMMONMEM") == 0)
     return 1;
-  if(strcmp(name, "_DISCARD") == 0)
+  if(strncmp(name, "_DISCARD", 8) == 0)
     return 1;
   if(strncmp(name, "_BOOT", 5) == 0)
     return 1;
   /* Data */
+  if(strcmp(name, "_COMMONDATA") == 0)
+    return 0;
   if(strcmp(name, "_INITIALIZER") == 0)
     return 0;
-  if(strcmp(name, "_DATA") == 0)
+  if(strncmp(name, "_DATA", 5) == 0)
+    return 0;
+  if(strncmp(name, "_BUFFERS", 8) == 0)
     return 0;
   if(strcmp(name, "_FONT") == 0)
     return 0;
@@ -240,13 +244,19 @@ static void process_stub(char *p)
 {
   int b1, b2, addr;
   char name[65];
+  char sname[65];
 
   if (strlen(p) > 4 && !isspace(p[8]))
     fprintf(stderr, "Overflow: %s", p);
-  if (sscanf(p, "%02x %04x %02x %64s", &b1, &addr, &b2, name) != 4) {
+  if (sscanf(p, "%02x %04x %02x %64s %64s", &b1, &addr, &b2, name, sname) != 5) {
     fprintf(stderr, "Invalid relocation link %s\n", p);
     exit(1);
   }
+  /* A data relocation into another bank of data is treated as deliberate.
+     We can't do much else. It's not code so we can't patch it, and if it's
+     a data pointer (as it should be) then a relocation is nonsense! */
+  if (!stub_code(sname) && !stub_code(name))
+    return;
   /* If we are stubbing the lot then code is handled as data is */
   if (stub_code(name) && !stub_all)
     code_reloc(b1, addr, b2);

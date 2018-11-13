@@ -61,9 +61,9 @@ void pagemap_add(uint8_t page)
 void pagemap_free(ptptr p)
 {
 	uint8_t *ptr = (uint8_t *) & p->p_page;
-	pfree[pfptr--] = *ptr;
+	pfree[pfptr++] = *ptr;
 	if (*ptr != ptr[1]) {
-		pfree[pfptr--] = ptr[1];
+		pfree[pfptr++] = ptr[1];
                 invalidate_cache((uint16_t)ptr[1]);
         }
 }
@@ -129,9 +129,13 @@ int pagemap_realloc(usize_t code, usize_t size, usize_t stack) {
 	if (want == have)
 		return 0;
 	if (have > want) {
+		/* Make a copy of the high vectors in the new low page */
 		pfree[pfptr++] = ptr[1];
 		ptr[1] = *ptr;
+		irq = __hard_di();
+		program_vectors(&udata.u_page);
 		udata.u_ptab->p_page = udata.u_page;
+		__hard_irqrestore(irq);
 		return 0;
 	}
 	/* If we are adding then just insert the new pages, keeping the common
@@ -157,5 +161,7 @@ int pagemap_realloc(usize_t code, usize_t size, usize_t stack) {
 usize_t pagemap_mem_used(void) {
 	return pfptr << 5;
 }
+
+/* FIXME: Swap */
 
 #endif

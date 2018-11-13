@@ -23,19 +23,18 @@
 	.globl outnibble
 
 	; platform provided functions
-	.globl map_kernel
-	.globl map_process_always
-        .globl map_save
+	.globl map_kernel_di
+	.globl map_process_always_di
+        .globl map_save_kernel
         .globl map_restore
 	.globl outchar
 	.globl _inint
 	.globl _platform_interrupt
 	.globl platform_interrupt_all
 	.globl _need_resched
-	.globl _switchout
+	.globl _platform_switchout
 
         ; exported symbols
-	.globl _chksigs
 	.globl null_handler
 	.globl unix_syscall_entry
         .globl _doexec
@@ -51,7 +50,9 @@
 	.globl mmu_irq_ret
 
         ; imported symbols
-        .globl _trap_monitor
+	.globl _chksigs
+	.globl _int_disabled
+        .globl _platform_monitor
         .globl _unix_syscall
         .globl outstring
         .globl kstack_top
@@ -99,6 +100,9 @@ deliver_signals_2:
 	; Indicate processed
 	xor a
 	ld (U_DATA__U_CURSIG), a
+	; and we will handle the signal with interrupts on so clear the
+	; flag
+	ld (_int_disabled),a
 
 	; Semantics for now: signal delivery clears handler
 	ld (hl), a
@@ -132,9 +136,14 @@ signal_return:
 	;
 	ld (U_DATA__U_SYSCALL_SP), sp
 	ld sp, #kstack_top
-	call map_kernel
+	;
+	;	Ensure chksigs and friends see the right status
+	;
+	ld a,#1
+	ld (_int_disabled),a
+	call map_kernel_di
 	call _chksigs
-	call map_process_always
+	call map_process_always_di
 	ld sp, (U_DATA__U_SYSCALL_SP)
 	jr deliver_signals
 
@@ -143,14 +152,17 @@ signal_return:
 ;	Syscall processing path
 ;
 unix_syscall_entry:
+	; We know the previous state was EI and that we won't do anything
+	; clever until we EI again, so we can avoid the helpers on the fast
+	; path.
         di
         ; store processor state
         ex af, af'
         push af
         ex af, af'
         exx
-        push bc		; FIXME we don't I tihnk need to save bc/de/hl
-        push de		; as they are compiler caller save
+        push bc		; FIXME we don't I think need to save bc/de/hl
+        push de		; as they are compiler caller save once we fix the API
         push hl
         exx
         push bc
@@ -163,7 +175,7 @@ unix_syscall_entry:
         add hl, sp
 
 	.ifne Z80_MMU_HOOKS
-	call mmu_kernel		; must preserve HL
+	call mmu_kernel			; must preserve HL
 	.endif
         ; save system call number
         ld a, (hl)
@@ -185,7 +197,7 @@ unix_syscall_entry:
         ld sp, #kstack_top
 
         ; map in kernel keeping common
-	call map_kernel
+	call map_kernel_di
 
         ; re-enable interrupts
         ei
@@ -201,10 +213,10 @@ unix_syscall_entry:
 	; The fork case returns with a different U_DATA mapped so the
 	; U_DATA referencing code is fine, but globals are usually not
 
-        di
+        di	; Again we know we won't mess up calling di/ei directly
 
 
-	call map_process_always
+	call map_process_always_di
 
 	xor a
 	ld (U_DATA__U_INSYS), a
@@ -282,7 +294,7 @@ via_signal:
 ;
 _doexec:
         di
-        call map_process_always
+        call map_process_always_di
 
         pop bc ; return address
         pop de ; start address
@@ -296,11 +308,11 @@ _doexec:
 
         ex de, hl
 
-	; for the relocation engine - tell it where it is
-	ld iy, #PROGLOAD
 	.ifne Z80_MMU_HOOKS
 	call mmu_user		; must preserve HL
 	.endif
+	; for the relocation engine - tell it where it is
+	ld de, #PROGLOAD
         ei
         jp (hl)
 
@@ -341,7 +353,7 @@ trap_illegal:
         ld hl, #illegalmsg
 traphl:
         call outstring
-        call _trap_monitor
+        call _platform_monitor
 
 nmimsg: .ascii "[NMI]"
         .db 13,10,0
@@ -350,7 +362,7 @@ nmi_handler:
 	.ifne Z80_MMU_HOOKS
 	call mmu_kernel
 	.endif
-	call map_kernel
+	call map_kernel_di
         ld hl, #nmimsg
 	jr traphl
 
@@ -411,13 +423,7 @@ mmu_irq_ret:
 
 	ld a, (0)
 
-	call map_save
-	;
-	;	FIXME: re-implement sanity checks and add a stack one
-	;
-
-	; We need the kernel mapped for the IRQ handling
-	call map_kernel
+	call map_save_kernel
 
 	cp #0xC3
 	call nz, null_pointer_trap
@@ -428,6 +434,9 @@ mmu_irq_ret:
 	ld (_inint), a
 	; So we know that this task should resume with IRQs off
 	ld (U_DATA__U_ININTERRUPT), a
+	; Load the interrupt flag properly. It got an implicit di from
+	; the IRQ being taken
+	ld (_int_disabled),a
 
 	call _platform_interrupt
 
@@ -472,6 +481,8 @@ intret:
 
 	; Then unstack and go.
 interrupt_pop:
+	xor a
+	ld (_int_disabled),a
         pop iy
         pop ix
         pop hl
@@ -531,7 +542,7 @@ preemption:
 				; and the controllers have seen the
 				; reti M1 cycle. However we still
 				; have DI set
-
+	di			; see undocumented Z80 notes on RETI
 	;
 	; We are now on the syscall stack (which is fine, we don't
 	; pre-empt mid syscall so therefore it is free.  We will now
@@ -540,8 +551,7 @@ preemption:
 	; hence the need to reti
 
 	;
-intret2:call map_kernel
-
+intret2:call map_kernel_di
 	;
 	; Semantically we are doing a null syscall for pre-empt. We need
 	; to record ourselves as in a syscall so we can't be recursively
@@ -550,11 +560,15 @@ intret2:call map_kernel
 	ld a, #1
 	ld (U_DATA__U_INSYS), a
 	;
+	; Check for signals
+	;
+	call _chksigs
+	;
 	; Process status is offset 0
 	;
 	ld hl, (U_DATA__U_PTAB)
 	ld (hl), #P_READY
-	call _switchout
+	call _platform_switchout
 	;
 	; We are no longer in an interrupt or a syscall
 	;
@@ -565,7 +579,7 @@ intret2:call map_kernel
 	; We have been rescheduled, remap ourself and go back to user
 	; space via signal handling
 	;
-	call map_process_always	; Get our user mapping back
+	call map_process_always_di ; Get our user mapping back
 
 
 	; We were pre-empted but have now been rescheduled
@@ -680,27 +694,44 @@ _out:
 	push bc
 	jp (hl)
 
+;
+;	Use z88dk_fastcall for in.
+;
 _in:
-	pop hl
-	pop bc
-	push bc
-	push hl
+	ld c,l
 	in l, (c)
 	ret
 
 ;
-;	Enable interrupts
+;	Deal with all the NMOS Z80 bugs and the buggy emulators by
+;	simply tracing our own interrupt status. It's cheaper this way
+;	but does mean any code that is using di and friends directly needs
+;	to be a lot more careful. We can also make irqflags_t 8bit and
+;	fastcall the irqrestore later on FIXME
 ;
 ___hard_ei:
+	xor a
+	ld (_int_disabled),a
 	ei
 	ret
 
-;
-;	Pull in the CPU specific workarounds
-;
+___hard_di:
+	ld hl,#_int_disabled
+	di
+	ld a,(hl)
+	ld (hl),#1
+	ld l,a
+	ret
 
-.ifeq CPU_NMOS_Z80
-	.include "lowlevel-z80-nmos.s"
-.else
-	.include "lowlevel-z80-cmos.s"
-.endif
+___hard_irqrestore:
+	pop de
+	pop hl
+	push hl
+	push de
+	di
+	ld a,l
+	ld (_int_disabled),a
+	or a
+	ret nz
+	ei
+	ret

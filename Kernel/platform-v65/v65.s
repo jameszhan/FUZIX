@@ -16,8 +16,8 @@
 	    .export platform_doexec
 
             ; exported debugging tools
-            .export _trap_monitor
-	    .export _trap_reboot
+            .export _platform_monitor
+	    .export _platform_reboot
             .export outchar
 	    .export ___hard_di
 	    .export ___hard_ei
@@ -57,13 +57,13 @@ syscall	     =  $FE
 ; -----------------------------------------------------------------------------
             .segment "COMMONMEM"
 
-_trap_monitor:
-	    jmp _trap_monitor
+_platform_monitor:
+	    jmp _platform_monitor
 
-_trap_reboot:
+_platform_reboot:
 	    lda #$A5
 	    sta $FE40		; Off
-	    jmp _trap_reboot	; FIXME: original ROM map and jmp
+	    jmp _platform_reboot	; FIXME: original ROM map and jmp
 
 ___hard_di:
 	    php
@@ -325,19 +325,54 @@ vector:
 ;
 ;	TODO: pre-emption
 ;
+	    lda _need_resched
+	    beq no_preempt
 
+	    lda	#0
+	    sta _need_resched
 
+	    ; Switch to our kernel stack which is free as we don't preempt
+	    ; from kernel space
+	    tsx
+	    stx	U_DATA__U_SYSCALL_SP
+	    ldx #kstack_top
+	    txs
 
+	    ;
+	    ; TODO: do we need to sort the C stack or is it sufficient to
+	    ; just do the 6502 stack at this point since we have a valid
+	    ; C stack.. the IRQ one for chksigs to run, while the
+	    ; platform_switchout code is asm only as we switch in ?
+	    ;
+	    lda	#1
+	    sta U_DATA__U_INSYS
+	    jsr	_chksigs
+	    ; Mark ourselves Ready not Running
+	    ldx U_DATA__U_PTAB
+	    lda	#P_READY
+	    sta a:P_TAB__P_STATUS_OFFSET,x
+	    ; Switch out .. we will re-appear at some point
+	    lda	U_DATA__U_PTAB
+	    ldx U_DATA__U_PTAB+1
+	    jsr _platform_switchout
+	    ;
+	    ; Now return to the old state having woken back up
+	    ; Clear insys, move back onto the interrupt stack
+	    ;
+	    lda #0
+	    sta U_DATA__U_INSYS
+	    ldx #U_DATA__U_SYSCALL_SP
+	    txs
+	    ;
+	    ; Check what signals are now waiting for us
+	    ;
+no_preempt:
 ;
 ;	Signal handling on 6502 is foul as the C stack may be inconsistent
 ;	during an IRQ. We push a new complete rti frame below the official
 ;	one, along with a vector and the signal number. The glue in the
 ;	app is expected to switch to a signal stack or similar, pop the
 ;	values, invoke the signal handler and then return.
-;
-;	FIXME: at the moment the irqout path will not check for multiple
-;	signals so the next one gets delivered next irq.
-;
 ;
 	    lda U_DATA__U_CURSIG
 	    beq irqout

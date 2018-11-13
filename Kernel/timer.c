@@ -14,6 +14,7 @@ timer_t set_timer_duration(uint16_t duration)
 	if (duration & 0x8000) {
 		kprintf("bad timer duration 0x%x\n", duration);
 	}
+	sync_clock();
 	/* obvious code is return (miniticks+duration), however we have to do */
 	/* it this longwinded way or sdcc doesn't load miniticks atomically */
 	/* sdcc 3.4.0 bug: ordering affects result */
@@ -25,6 +26,7 @@ timer_t set_timer_duration(uint16_t duration)
 
 bool timer_expired(timer_t timer_val)
 {
+	sync_clock();
 	return ((timer_val - ticks.h.low) & 0x8000);
 }
 
@@ -33,6 +35,7 @@ bool timer_expired(timer_t timer_val)
 void rdtime(time_t *tloc)
 {
         irqflags_t irq = di();
+	sync_clock();
         memcpy(tloc, &tod, sizeof(tod));
 	irqrestore(irq);
 }
@@ -41,6 +44,7 @@ void rdtime(time_t *tloc)
 void rdtime32(uint32_t *tloc)
 {
         irqflags_t irq = di();
+	sync_clock();
         *tloc = tod.low;
 	irqrestore(irq);
 }
@@ -48,11 +52,13 @@ void rdtime32(uint32_t *tloc)
 void wrtime(time_t *tloc)
 {
         irqflags_t irq = di();
+	sync_clock();
         memcpy(&tod, tloc, sizeof(tod));
+        update_sync_clock();
 	irqrestore(irq);
 }
 
-#ifndef CONFIG_RTC
+#if !defined(CONFIG_RTC) || defined(CONFIG_NO_CLOCK)
 static uint8_t tod_deci;
 /* Update software emulated clock. Called ten times
    a second */
@@ -99,12 +105,18 @@ void updatetod(void)
 	tod_deci = 0;
 #endif
 
-	rtcnew = rtc_secs();		/* platform function */
+	rtcnew = platform_rtc_secs();		/* platform function */
 
-	if (rtcnew == rtcsec)
+	if (rtcnew == rtcsec || rtcnew == 255)
 		return;
 	slide = rtcnew - rtcsec;	/* Seconds elapsed */
 	rtcsec = rtcnew;
+	/*
+	 *	We assume a small negative warp in seconds is telling us
+	 *	that the clock is running too fast and we should stall.
+	 */
+	if (slide == -1)
+		return;
 addtod:
 	if (slide < 0)
 		slide += 60;		/* Seconds wrapped */
@@ -115,7 +127,7 @@ addtod:
 
 void inittod(void)
 {
-	rtcsec = rtc_secs();
+	rtcsec = platform_rtc_secs();
 }
 
 #endif				/* NO_RTC */

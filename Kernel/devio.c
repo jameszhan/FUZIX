@@ -103,7 +103,6 @@ bufptr bread(uint16_t dev, blkno_t blk, bool rewrite)
 			}
 		}
 	}
-	bp->bf_time = ++bufclock;	/* Time stamp it */
 	return bp;
 }
 
@@ -142,10 +141,31 @@ int bfree(regptr bufptr bp, uint8_t dirty)
 		}
 		bp->bf_dirty = false;
 	}
+	/* Time stamp the buffer on free up. It doesn't matter if we stamp it
+	   on read or free as while locked it can't go away. However if we
+	   stamp it on free we can in future make smarter decisions such as
+	   recycling full dirty buffers faster than partial ones */
+	bp->bf_time = ++bufclock;
 	bunlock(bp);
 	return ret;
 }
 
+/*
+ * Allocate an empty _disk cache_ buffer. We use this when dealing with file
+ * holes. It would be nice if this API could go way and readi just use uzero()
+ */
+bufptr zerobuf(void)
+{
+	regptr bufptr bp;
+
+	bp = freebuf();
+	bp->bf_dev = NO_DEVICE;
+	bp->bf_time = ++bufclock;	/* Time stamp it */
+	blkzero(bp);
+	return bp;
+}
+
+#ifndef CONFIG_BLKBUF_EXTERNAL
 /*
  * Allocate a buffer for scratch use by the kernel. This buffer can then
  * be freed with tmpfree.
@@ -153,6 +173,7 @@ int bfree(regptr bufptr bp, uint8_t dirty)
  * API note: Nothing guarantees a connection between a bufcache entry
  * and tmpbuf in future. Always free with tmpfree.
  */
+
 void *tmpbuf(void)
 {
 	regptr bufptr bp;
@@ -162,20 +183,7 @@ void *tmpbuf(void)
 	bp->bf_time = ++bufclock;	/* Time stamp it */
 	return bp->__bf_data;
 }
-
-/*
- * Allocate an empty _disk cache_ buffer. We use this when dealing with file
- * holes. It would be nice if this API could go way and readi just use uzero()
- *
- * This won't be able to use tmpbuf if we split disk and temporary buffers. 
- */
-void *zerobuf(void)
-{
-	void *b = tmpbuf();
-	memset(b, 0, 512);
-
-	return b;
-}
+#endif
 
 /*
  * Write back a buffer doing the locking outselves. This is called when
@@ -541,16 +549,14 @@ bool uninsq(struct s_queue *q, unsigned char *cp)
 	return r;
 }
 
-// WRS: this isn't used
-// /* Returns true if the queue has more characters than its wakeup number
-//  */
-// bool fullq(struct s_queue *q)
-// {
-//     if (q->q_count > q->q_wakeup) // WRS: shouldn't this be >= ?
-//         return true;
-//     else
-//         return false;
-// }
+/* Returns true if the queue has more characters than its wakeup number */
+bool fullq(struct s_queue *q)
+{
+    if (q->q_count > q->q_wakeup) // WRS: shouldn't this be >= ?
+        return true;
+    else
+        return false;
+}
 
 /*********************************************************************
              Miscellaneous helpers

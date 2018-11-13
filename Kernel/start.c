@@ -7,7 +7,7 @@
 
 #define BAD_ROOT_DEV 0xFFFF
 
-static uint8_t ro;
+static uint8_t ro = 1;
 
 /*
  *	Put nothing here that cannot be discarded. We make the entirety
@@ -21,7 +21,7 @@ static uint8_t ro;
 static const struct termios ttydflt = {
 	BRKINT | ICRNL,
 	OPOST | ONLCR,
-	CS8 | TTY_INIT_BAUD | CREAD | HUPCL,
+	CS8 | TTY_INIT_BAUD | CREAD | HUPCL | CLOCAL,
 	ISIG | ICANON | ECHO | ECHOE | ECHOK | IEXTEN,
 	{CTRL('D'), 0, CTRL('H'), CTRL('C'),
 	 CTRL('U'), CTRL('\\'), CTRL('Q'), CTRL('S'),
@@ -83,9 +83,9 @@ void create_init(void)
 {
 	uint8_t *j;
 
+	udata.u_top = PROGLOAD + 512;	/* Plenty for the boot */
 	init_process = ptab_alloc();
 	udata.u_ptab = init_process;
-	udata.u_top = PROGLOAD + 4096;	/* Plenty for the boot */
 	init_process->p_top = udata.u_top;
 	map_init();
 	newproc(init_process);
@@ -99,8 +99,10 @@ void create_init(void)
 		*j = NO_FILE;
 	}
 	/* Poke the execve arguments into user data space so _execve() can read them back */
+	/* Some systems only have a tiny window we can use at boot as most of
+	   this space is loaded with common memory */
 	argptr = PROGLOAD;
-	progptr = PROGLOAD + 2048;
+	progptr = PROGLOAD + 256;
 
 	uzero((void *)progptr, 32);
 	add_argument("/init");
@@ -112,7 +114,7 @@ void complete_init(void)
 	uputp(0, (void *)argptr);
 	/* Set up things to look like the process is calling _execve() */
 	udata.u_argn2 = (arg_t)argptr; /* Environment (none) */
-	udata.u_argn =  (arg_t)PROGLOAD + 2048; /* "/init" */
+	udata.u_argn =  (arg_t)PROGLOAD + 256; /* "/init" */
 	udata.u_argn1 = (arg_t)PROGLOAD; /* Arguments */
 
 #ifdef CONFIG_LEVEL_2
@@ -301,10 +303,10 @@ uint16_t get_root_dev(void)
 }
 #else
 
+static uint8_t first = 1;
+
 inline uint16_t get_root_dev(void)
 {
-	static uint8_t first = 1;
-
 	if (first) {
 		first = 0;
 		return BOOTDEVICE;
@@ -334,9 +336,9 @@ void fuzix_main(void)
 			"Copyright (c) 1988-2002 by H.F.Bower, D.Braun, S.Nitschke, H.Peraza\n"
 			"Copyright (c) 1997-2001 by Arcady Schekochikhin, Adriano C. R. da Cunha\n"
 			"Copyright (c) 2013-2015 Will Sowerbutts <will@sowerbutts.com>\n"
-			"Copyright (c) 2014-2017 Alan Cox <alan@etchedpixels.co.uk>\nDevboot\n",
+			"Copyright (c) 2014-2018 Alan Cox <alan@etchedpixels.co.uk>\nDevboot\n",
 			sysinfo.uname);
-
+	platform_copyright();
 #ifndef SWAPDEV
 #ifdef PROC_SIZE
 	maxproc = procmem / PROC_SIZE;
@@ -402,7 +404,7 @@ void fuzix_main(void)
 
 	udata.u_cwd = i_ref(root);
 	udata.u_root = i_ref(root);
-	rdtime32(&udata.u_time);
+	rdtime32(&udata.u_ptab->p_time);
 	exec_or_die();
 }
 

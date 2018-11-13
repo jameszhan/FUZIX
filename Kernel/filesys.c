@@ -17,8 +17,6 @@
  * will be set to NULL.
  * The last node parsed is saved in lastname and is useful to some system
  * calls as they want a parent and to create the new node.
- *
- * FIXME: ENAMETOOLONG might be good to add
  */
 
 char lastname[31];
@@ -30,6 +28,8 @@ static uint8_t getcf(void)
     int16_t c;
     c = ugetc(name);
     if (c == -1 || name == nameend) {
+        if (name == nameend)
+            udata.u_error = ENAMETOOLONG;
         n_open_fault = 1;
         return 0;
     }
@@ -112,7 +112,7 @@ inoptr n_open(char *namep, inoptr *parent)
                 name += 2;
                 continue;
             }
-            temp = fs_tab_get(wd->c_dev)->m_fs.s_mntpt;
+            temp = fs_tab[wd->c_super].m_mntpt;
             ++temp->c_refs;
             i_deref(wd);
             wd = temp;
@@ -193,7 +193,7 @@ inoptr srch_mt(inoptr ino)
     struct mount *m = &fs_tab[0];
 
     for(j=0; j < NMOUNTS; ++j){
-        if(m->m_dev != NO_DEVICE &&  m->m_fs.s_mntpt == ino) {
+        if(m->m_dev != NO_DEVICE &&  m->m_mntpt == ino) {
             i_deref(ino);
             return i_open(m->m_dev, ROOTINODE);
         }
@@ -207,6 +207,10 @@ inoptr srch_mt(inoptr ino)
  * and makes an entry in the inode table for them, or
  * increases it reference count if it is already there.
  * An inode # of zero means a newly allocated inode.
+ *
+ * Once we support sleeping on bigger boxes during I/O we will need
+ * a lock (superblock lock perhaps) to cover allocation of blocks and
+ * inodes.
  */
 
 inoptr i_open(uint16_t dev, uint16_t ino)
@@ -263,6 +267,7 @@ inoptr i_open(uint16_t dev, uint16_t ino)
 
     nindex->c_dev = dev;
     nindex->c_num = ino;
+    nindex->c_super = m - fs_tab;
     nindex->c_magic = CMAGIC;
     nindex->c_flags = (m->m_flags & MS_RDONLY) ? CRDONLY : 0;
 found:
@@ -519,6 +524,8 @@ bool inline baddev(fsptr dev)
 
 /* I_alloc finds an unused inode number, and returns it, or 0
  * if there are no more inodes available.
+ *
+ * This will need to happen under the superblock lock once we do sleeping
  */
 
 uint16_t i_alloc(uint16_t devno)
@@ -586,6 +593,8 @@ corrupt:
 /* I_free is given a device and inode number, and frees the inode.
  * It is assumed that there are no references to the inode in the
  * inode table or in the filesystem.
+ *
+ * This will need to happen under the superblock lock once we do sleeping
  */
 
 void i_free(uint16_t devno, uint16_t ino)
@@ -606,6 +615,8 @@ void i_free(uint16_t devno, uint16_t ino)
 
 /* Blk_alloc is given a device number, and allocates an unused block
  * from it. A returned block number of zero means no more blocks.
+ *
+ * This will need to happen under the superblock lock once we do sleeping
  */
 
 blkno_t blk_alloc(uint16_t devno)
@@ -649,6 +660,11 @@ blkno_t blk_alloc(uint16_t devno)
         goto corrupt;
     --dev->s_tfree;
 
+   /*
+    * FIXME: When we implement the rest of the bigger block size fs support
+    * this routine is responsible for zeroing the entire extent not just the
+    * 512 byte block
+    */
     /* Zero out the new block */
     buf = bread(devno, newno, 2);
     if (buf == NULL)
@@ -668,6 +684,8 @@ corrupt2:
 
 /* Blk_free is given a device number and a block number,
  * and frees the block.
+ *
+ * This will need to happen under the superblock lock once we do sleeping
  */
 
 void blk_free(uint16_t devno, blkno_t blk)
@@ -915,13 +933,13 @@ void freeblk(uint16_t dev, blkno_t blk, uint8_t level)
         buf = bread(dev, blk, 0);
         if (buf == NULL) {
             corrupt_fs(dev);
-            return:
+            return;
         }
-        for(j=255; j >= 0; --j)
+        for(j=255; j >= 0; --j) {
             blktok(&bn, buf, j * sizeof(blkno_t), sizeof(blkno_t));
             freeblk(dev, bn[j], level-1);
         }
-        brelse((char *)buf);
+        brelse(buf);
     }
     blk_free(dev, blk);
 }
@@ -1039,6 +1057,66 @@ blkno_t bmap(inoptr ip, blkno_t bn, int rwflg)
     }
     return(nb);
 }
+
+#ifdef CONFIG_BIG_FS
+/*
+ *	On systems with 32bit blkno_t we support larger block sizes but
+ *	keeping the same fundamental layout. That keeps our file system
+ *	changes right down. i_shift comes from the superblock. For bigger
+ *	systems we should instead consider a fast index into superblock tables
+ *
+ *	We support shifts of:
+ *
+ *	0	512 byte blocks		32MB 		classic Fuzix
+ *	1	1024			64MB
+ *	2	2048			128MB
+ *	3	4096			256MB
+ *	4	8192			512MB
+ *	5	16384			1GB		just to beat cp/m 8)
+ *
+ *	All our low level I/O is still done in 512 byte chunks, they are just
+ *	linear extents so we don't blow our buffer budget or need to handle
+ *	alignment and buffer cache size problems. It also means our fsck scales
+ *	even on tiny machines
+ *
+ *	TODO:
+ *	fsck and mkfs support
+ *	truncate checks
+ *	hole allocation	 (the one ugly). When we allocate a new block we must
+ *		zero the entire real block (could be 16K).
+ *	hinting to the underlying block layer the fs alignment (so it can
+ *	try to do bigger I/O requests when it wants to be clever on a big
+ *	system).
+ *	Split blkno_t into blkno_t and fs_blkno_t or similar so you can have
+ *	32bit physical blocks.
+ *
+ */
+
+static const uint16_t blkmask[] = {
+    0x00,	/* 512 */
+    0x01,	/* 1024 */
+    0x03,	/* 2048 */
+    0x07,	/* 4096 */
+    0x0F,	/* 8192 */
+    0x1F	/* 16384 */
+};
+
+blkno_t bmap(inoptr ip, blkno_t blk, int rwflg)
+{
+    /* Linear bits */
+    uint8_t shift = fs_tab[ip->c_super].m_fs.s_shift;
+    uint8_t blklo = ((uint8_t)blk) & blkmask[shift];
+    /* Non linear index bits */
+    blk >>= shift;
+    blk = do_bmap(ip, blk, rwflg);
+    /* Holes are full sized of course */
+    if (blk == 0)
+        return 0;
+    blk <<= shift;;
+    blk |= blklo;
+    return blk;
+}
+#endif
 
 /* Validblk panics if the given block number is not a valid
  *  data block for the given device.
@@ -1206,7 +1284,8 @@ bool fmount(uint16_t dev, inoptr ino, uint16_t flags)
 #endif
 
     /* See if there really is a filesystem on the device */
-    if(fp->s_mounted != SMOUNTED  ||  fp->s_isize >= fp->s_fsize) {
+    if(fp->s_mounted != SMOUNTED  ||  fp->s_isize >= fp->s_fsize ||
+        fp->s_shift > FS_MAX_SHIFT) {
         udata.u_error = EINVAL;
         return true; // failure
     }
@@ -1220,7 +1299,7 @@ bool fmount(uint16_t dev, inoptr ino, uint16_t flags)
         fp->s_fmod = FMOD_DIRTY;
     else	/* Clean in memory, don't write it back to media */
         fp->s_fmod = FMOD_CLEAN;
-    fp->s_mntpt = ino;
+    m->m_mntpt = ino;
     if(ino)
         ++ino->c_refs;
     m->m_flags = flags;

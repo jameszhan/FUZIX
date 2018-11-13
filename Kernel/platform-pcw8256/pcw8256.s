@@ -8,17 +8,24 @@
             .globl init_early
             .globl init_hardware
             .globl _program_vectors
+	    .globl map_buffers
 	    .globl map_kernel
 	    .globl map_process
 	    .globl map_process_always
+	    .globl map_kernel_di
+	    .globl map_process_di
+	    .globl map_process_always_di
 	    .globl _need_resched
-	    .globl map_save
+	    .globl _int_disabled
+	    .globl map_save_kernel
 	    .globl map_restore
+	    .globl map_for_swap
 	    .globl platform_interrupt_all
+	    .globl _copy_common
 
             ; exported debugging tools
-            .globl _trap_monitor
-            .globl _trap_reboot
+            .globl _platform_monitor
+            .globl _platform_reboot
             .globl outchar
 	    .globl _bugout
 
@@ -27,6 +34,7 @@
 	    .globl _scroll_down
 	    .globl _cursor_on
 	    .globl _cursor_off
+	    .globl _cursor_disable
 	    .globl _plot_char
 	    .globl _do_beep
 	    .globl _clear_lines
@@ -67,14 +75,14 @@ font8x8	    .equ	0x9C00		; font loaded after framebuffer
 ;
 ;	Ask the controller to reboot
 ;
-_trap_reboot:
+_platform_reboot:
 	    ld a, #0x01
 	    out (0xF8), a
             ; should never get here
-_trap_monitor:
+_platform_monitor:
 	    di
 	    halt
-	    jr _trap_monitor
+	    jr _platform_monitor
 
 platform_interrupt_all:
 	    ret
@@ -164,12 +172,15 @@ _program_vectors:
 ;
 ;	map_kernel		-	map in the kernel, trashes nothing
 ;	map_process_always	-	map in the current process, ditto
+;	map_buffers		-	map in the kernel + buffers, ditto
 ;	map_process		-	map the pages pointed to by hl, eats
 ;					a, hl
 ;
 kmap:	    .db 0x80, 0x81, 0x82, 0x83
 
+map_buffers:
 map_kernel:
+map_kernel_di:
 	    push af
 	    push hl
 	    ld hl, #kmap
@@ -178,7 +189,13 @@ map_kernel:
 	    pop af
 	    ret
 
+map_for_swap:
+	    ld (map_current+1),a
+	    out (0xF1),a	; map at 0x4000
+	    ret
+
 map_process_always:
+map_process_always_di:
 	    push af
 	    push hl
 	    ld hl, #U_DATA__U_PAGE
@@ -187,12 +204,16 @@ map_process_always:
 	    pop af
 	    ret
 
+;
+;	We shouldn't need IRQ protection here - review
+;
 map_process:
+map_process_di:
 	    ld a, h
 	    or l
 	    jr z, map_kernel
 map_process_1:
-	    ld a, i
+	    ld a, (int_disabled)
 	    push af
 	    di			; ensure we don't take an irq mid update
 	    push de
@@ -211,11 +232,13 @@ map_loop:
 	    pop bc
 	    pop de
 	    pop af
-	    ret po
+	    or a
+	    ret nz
 	    ei
 	    ret
 
-map_save:   push hl
+map_save_kernel:
+	    push hl
 	    push de
 	    push bc
 	    ld hl, #map_current
@@ -223,6 +246,10 @@ map_save:   push hl
 	    ldi
 	    ldi
 	    ldi
+	    push af
+	    ld hl, #kmap
+	    call map_process_1
+	    pop af
 	    pop bc
 	    pop de
 	    pop hl
@@ -235,6 +262,23 @@ map_restore:push hl
 	    pop af
             pop hl
             ret
+
+;
+;	Make a copy of common into a new page in order to use it for a
+;	process.
+;
+_copy_common:
+	    pop hl
+	    pop de
+	    push de
+	    push hl
+	    ld a,e
+	    out (0xf1),a	; 4000-7FFF
+	    ld hl,#0xF000
+	    ld de,#0x7000
+	    ld bc,#0x1000
+	    ldir
+	    jr map_kernel
 
 
 _bugout:    pop hl
@@ -292,7 +336,7 @@ _scroll_down:
 
 	    .area _COMMONMEM
 
-addr_de:    ld a, i
+addr_de:    ld a, (_int_disabled)
 	    push af
 	    ld a, (roller)
 	    rra			; in text lines
@@ -349,7 +393,8 @@ addr_de:    ld a, i
 	    out (0xf1), a
 	    pop bc
 	    pop af
-	    ret po
+	    or a
+	    ret nz
 	    ei
 	    ret
 _plot_char:
@@ -392,6 +437,7 @@ _cursor_off:
 	    ld de, (cursorpos)
 	    jr cursordo
 
+_cursor_disable:
 _do_beep:
 	    ret
 
@@ -473,3 +519,7 @@ map_save_area:
 
 _need_resched:
 	    .db 0
+
+_int_disabled:
+	    .db 1
+

@@ -25,8 +25,8 @@
 	.globl _vtoutput
 
 	; exported debugging tools
-	.globl _trap_monitor
-	.globl _trap_reboot
+	.globl _platform_monitor
+	.globl _platform_reboot
 	.globl outchar
 	.globl ___hard_di
 	.globl ___hard_ei
@@ -97,15 +97,19 @@ init_hardware:
 
             .area .common
 
-_trap_reboot:
+_platform_reboot:
 	    orcc #0x10
-	    clr 0xFFBE
+	    IFDEF MOOH
+	    clr 0xFF90		; disable MMU on MOOH
+	    ELSE
+	    clr 0xFFBE		; disable nx32 memory
+	    ENDC
 	    clr 0x0071
 	    jmp [0xFFFE]
 
-_trap_monitor:
+_platform_monitor:
 	    orcc #0x10
-	    bra _trap_monitor
+	    bra _platform_monitor
 
 ___hard_di:
 	    tfr cc,b		; return the old irq state
@@ -285,6 +289,6 @@ outchar:
 	sta 0xFF20
 	rts
 
-	    .area .common
+	    .area .commondata
 
 _need_resched: .db 0

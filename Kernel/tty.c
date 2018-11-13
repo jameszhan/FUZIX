@@ -90,6 +90,7 @@ int tty_read(uint8_t minor, uint8_t rawflag, uint8_t flag)
 		++udata.u_base;
 	}
 out:
+	tty_data_consumed(minor);
 	wakeup(&q->q_count);
 	return udata.u_done;
 
@@ -122,6 +123,15 @@ int tty_write(uint8_t minor, uint8_t rawflag, uint8_t flag)
 			if (psleep_flags_io(&t->flag, flag))
 				return udata.u_done;
 		}
+		/* We could optimize this significantly by 
+		   a) looping here if not sleeping rather than repeating all
+		   the checks except for STOP/DISCARD
+		   b) possibly batching for the case where tty never blocks
+		   if we have a way to report that. We could then batch except
+		   for conversions and also fast path in vt for 'normal char
+		   next char normal'
+		   c) look at hint/batching for ugetc into a local work buffer
+		*/
 		if (!(t->flag & TTYF_DISCARD)) {
 			if (udata.u_sysio)
 				c = *udata.u_base;
@@ -167,7 +177,7 @@ int tty_open(uint8_t minor, uint16_t flag)
 	        t->users++;
 	        return 0;
         }
-	tty_setup(minor);
+	tty_setup(minor, 0);
 	if ((t->termios.c_cflag & CLOCAL) || (flag & O_NDELAY))
 		goto out;
 
@@ -244,6 +254,8 @@ void tty_exit(void)
 int tty_ioctl(uint8_t minor, uarg_t request, char *data)
 {				/* Data in User Space */
         struct tty *t;
+        uint8_t waito = 0;
+        staticfast struct termios tm;
 
         t = &ttydata[minor];
 
@@ -264,19 +276,33 @@ int tty_ioctl(uint8_t minor, uarg_t request, char *data)
 	switch (request) {
 	case TCGETS:
 		return uput(&t->termios, data, sizeof(struct termios));
-		break;
 	case TCSETSF:
 		clrq(&ttyinq[minor]);
 		/* Fall through for now */
 	case TCSETSW:
-		/* We don't have an output queue really so for now drop
-		   through */
+		waito = 1;
 	case TCSETS:
-		if (uget(data, &t->termios, sizeof(struct termios)) == -1)
+	{
+		tcflag_t *dp = termios_mask[minor];
+		if (uget(data, &tm, sizeof(struct termios)) == -1)
 		        return -1;
-                tty_setup(minor);
+		memcpy(t->termios.c_cc, tm.c_cc, NCCS);
+		t->termios.c_iflag &= ~*dp;
+		tm.c_iflag &= *dp++;
+		t->termios.c_iflag |= tm.c_iflag;
+		t->termios.c_oflag &= ~*dp;
+		tm.c_oflag &= *dp++;
+		t->termios.c_oflag |= tm.c_oflag;
+		t->termios.c_cflag &= ~*dp;
+		tm.c_cflag &= *dp++;
+		t->termios.c_cflag |= tm.c_cflag;
+		t->termios.c_lflag &= ~*dp;
+		tm.c_lflag &= *dp;
+		t->termios.c_lflag |= tm.c_lflag;
+                tty_setup(minor, waito);
                 tty_selwake(minor, SELECT_IN|SELECT_OUT);
 		break;
+	}
 	case TIOCINQ:
 		return uput(&ttyinq[minor].q_count, data, 2);
 	case TIOCFLUSH:
@@ -374,7 +400,7 @@ uint8_t tty_inproc(uint8_t minor, unsigned char c)
 #endif
 #ifdef CONFIG_MONITOR
 	if (c == 0x01)		/* ^A */
-		trap_monitor();
+		platform_monitor();
 #endif
 
 	if (c == '\r' ){
@@ -511,12 +537,14 @@ uint8_t tty_putc_maywait(uint8_t minor, unsigned char c, uint8_t flag)
 				udata.u_error = EINTR;
 				return 1;
 			}
-			if (t == TTY_READY_LATER && flag) {
-				udata.u_error = EAGAIN;
-				return 1;
-			}
 			if (t != TTY_READY_SOON || need_reschedule()){
-				irqflags_t irq = di();
+				irqflags_t irq;
+
+				if (flag) {
+					udata.u_error = EAGAIN;
+					return 1;
+				}
+				irq = di();
 				tty_sleeping(minor);
 				psleep(&ttydata[minor]);
 				irqrestore(irq);

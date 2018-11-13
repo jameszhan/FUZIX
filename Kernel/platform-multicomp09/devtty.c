@@ -76,6 +76,29 @@ struct s_queue ttyinq[NUM_DEV_TTY + 1] = {
 	{tbufa, tbufa, tbufa, TTYSIZ, 0, TTYSIZ / 2},
 };
 
+static tcflag_t console_mask[4] = {
+	_ISYS,
+	_OSYS,
+	_CSYS,
+	_LSYS
+};
+
+tcflag_t *termios_mask[NUM_DEV_TTY + 1] = {
+	NULL,
+	/* Virtual UART */
+	console_mask,
+	console_mask,
+	/* Drivewire */
+	console_mask,
+	console_mask,
+	console_mask,
+	console_mask,
+	/* Virtual Window */
+	console_mask,
+	console_mask,
+	console_mask,
+	console_mask
+};
 
 
 /* A wrapper for tty_close that closes the DW port properly */
@@ -133,7 +156,7 @@ void tty_sleeping(uint8_t minor)
 }
 
 
-void tty_setup(uint8_t minor)
+void tty_setup(uint8_t minor, uint8_t flags)
 {
 	if (minor > 2) {
 		dw_vopen(minor);
@@ -153,6 +176,9 @@ void tty_interrupt(void)
 
 }
 
+void tty_data_consumed(uint8_t minor)
+{
+}
 
 
 void platform_interrupt(void)

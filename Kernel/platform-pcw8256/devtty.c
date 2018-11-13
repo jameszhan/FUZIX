@@ -5,6 +5,8 @@
 #include <devtty.h>
 #include <tty.h>
 #include <vt.h>
+#include <input.h>
+#include <devinput.h>
 
 #undef  DEBUG            /* UNdefine to delete debug code sequences */
 
@@ -112,7 +114,7 @@ void tty_irq(void)
 }
 
 /* Called to set baud rate etc */
-void tty_setup(uint8_t minor)
+void tty_setup(uint8_t minor, uint8_t flags)
 {
     minor;
 }
@@ -127,6 +129,10 @@ int tty_carrier(uint8_t minor)
 void tty_sleeping(uint8_t minor)
 {
     minor;
+}
+
+void tty_data_consumed(uint8_t minor)
+{
 }
 
 /* Pending better ioctl bits set up for 9600 8N1 */
@@ -198,7 +204,7 @@ static void keyproc(void)
 	}
 }
 
-uint8_t keyboard[12][8] = {
+const uint8_t keyboard[12][8] = {
 	{'2', '3', '6', '9', KEY_PASTE ,KEY_F1, '0', KEY_F3},
 	{'1', '5', '4', '8', KEY_COPY, KEY_CUT, KEY_PRINT, KEY_EXIT},
 	{KEY_PLUS, KEY_HALF, 0, '7', '#', 13, ']', KEY_DELR},
@@ -213,7 +219,7 @@ uint8_t keyboard[12][8] = {
 	{0, 0, 0, 0, 0, 0, 0, 0}	/* FIXME: js 2 */
 };
 
-uint8_t shiftkeyboard[12][8] = {
+const uint8_t shiftkeyboard[12][8] = {
 	{'2', '3', '6', '9', KEY_PASTE, KEY_F2, '0', KEY_F4},
 	{'1', '5', '4', '8', KEY_COPY, KEY_CUT, KEY_PRINT, KEY_EXIT},
 	{KEY_PLUS, '@', 0, '7', '>', 13, '}', KEY_DELR},
@@ -251,8 +257,23 @@ static void keydecode(void)
 	if (capslock && c >= 'a' && c <= 'z')
 		c -= 'a' - 'A';
 /*        kprintf("ttyinproc %d\n", (int) c); */
-	vt_inproc(1, c);
+	switch(keyboard_grab) {
+		case 1:
+			/* FIXME: proper rule needed */
+			if (c >= 0x84)
+				queue_input(c);
+			/* Fall through */
+		case 0:
+			vt_inproc(1, c);
+			return;
+		case 2:
+			queue_input(c);
+			return;
+	}
 }
+
+/* Vblank ticker */
+uint8_t vblank;
 
 /* FIXME: keyboard repeat
           floppy motor etc */
@@ -269,5 +290,8 @@ void platform_interrupt(void)
 			kbd_timer = keyrepeat.continual;
 		}
 	}
+	vblank++;
+	wakeup(&vblank);
+	/* Should also run the mouse accumulator here FIXME */
 	timer_interrupt();
 }

@@ -15,6 +15,18 @@ struct  s_queue  ttyinq[NUM_DEV_TTY+1] = {       /* ttyinq[0] is never used */
     {   tbuf1,   tbuf1,   tbuf1,   TTYSIZ,   0,   TTYSIZ/2 },
 };
 
+static tcflag_t port_mask[4] = {
+	_ISYS,
+	_OSYS,
+	_CSYS,
+	_LSYS
+};
+
+tcflag_t *termios_mask[NUM_DEV_TTY + 1] = {
+	NULL,
+	port_mask
+};
+
 /* Write to system console */
 void kputchar(char c)
 {
@@ -41,6 +53,10 @@ void tty_sleeping(uint8_t minor)
     used(minor);
 }
 
+void tty_data_consumed(uint8_t minor)
+{
+}
+
 /* Called every timer tick */
 void tty_pollirq(void)
 {
@@ -51,7 +67,7 @@ void tty_pollirq(void)
     }
 }    
 
-void tty_setup(uint8_t minor)
+void tty_setup(uint8_t minor, uint8_t flags)
 {
     used(minor);
 }

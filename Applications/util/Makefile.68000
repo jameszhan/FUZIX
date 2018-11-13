@@ -43,6 +43,7 @@ SRCSNS = \
 	reboot.c \
 	rm.c \
 	rmdir.c \
+	substroot.c \
 	sum.c \
 	sync.c \
 	tee.c \
@@ -75,9 +76,12 @@ SRCS  = \
 	fgrep.c \
 	free.c \
 	fsck.c \
+	fsck-fuzix.c \
+	gptparse.c \
 	grep.c \
 	id.c \
 	kbdrate.c \
+	labelfs.c \
 	ll.c \
 	ls.c \
 	man.c \
@@ -91,6 +95,8 @@ SRCS  = \
 	ps.c \
 	remount.c \
 	sed.c \
+	seq.c \
+	setdate.c \
 	sleep.c \
 	ssh.c \
 	socktest.c \

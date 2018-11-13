@@ -6,10 +6,10 @@
         .globl _newproc
         .globl _chksigs
         .globl _getproc
-        .globl _trap_monitor
+        .globl _platform_monitor
         .globl trap_illegal
         .globl _inint
-        .globl _switchout
+        .globl _platform_switchout
         .globl _switchin
         .globl _doexec
         .globl _dofork
@@ -34,13 +34,8 @@
 ; possibly the same process, and switches it in.  When a process is
 ; restarted after calling switchout, it thinks it has just returned
 ; from switchout().
-;
-; FIXME: make sure we optimise the switch to self case higher up the stack!
-; 
-; This function can have no arguments or auto variables.
-_switchout:
+_platform_switchout:
         di
-        call _chksigs
         ; save machine state
 
         ld hl, #0 ; return code set here is ignored, but _switchin can 
@@ -77,7 +72,7 @@ switchoutlow:
         call _switchin
 
         ; we should never get here
-        call _trap_monitor
+        call _platform_monitor
 
 badswitchmsg: .ascii "_switchin: FAIL"
             .db 13, 10, 0
@@ -181,7 +176,8 @@ switchlow2:
         pop hl ; return code
 
         ; enable interrupts, if the ISR isn't already running
-        ld a, (_inint)
+        ld a, (U_DATA__U_ININTERRUPT)
+	ld (_int_disabled),a
         or a
         ret z ; in ISR, leave interrupts off
         ei
@@ -192,7 +188,7 @@ switchinfail:
         ld hl, #badswitchmsg
         call outstring
 	; something went wrong and we didn't switch in what we asked for
-        jp _trap_monitor
+        jp _platform_monitor
 
 ; (hl) points to cached page ptr, a is desired page
 update_cache:
@@ -229,7 +225,7 @@ _flush_cache:		; argument is the process it may apply to
 	pop hl
 	push hl
 	push de
-	ld a, i
+	ld a, (_int_disabled)
 	push af
 	ld de, #P_TAB__P_PAGE_OFFSET + 1
 	add hl, de
@@ -239,7 +235,8 @@ _flush_cache:		; argument is the process it may apply to
 	di
 	call flush_cache_self
 	pop af
-	ret po
+	or a
+	ret nz
 	ei
 	ret
 flush_none:

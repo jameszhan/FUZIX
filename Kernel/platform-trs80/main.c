@@ -33,13 +33,15 @@ uint8_t platform_param(char *p)
 
 void platform_interrupt(void)
 {
-  uint8_t irq = irqstat;
+  uint8_t irq = ~irqstat;
+  uint8_t dummy;
   if (irq & 0x20)
     tty_interrupt();
-  if (!(irq & 0x80))
-    return;
-  kbd_interrupt();
-  timer_interrupt();
+  if (irq & 0x04) {
+    kbd_interrupt();
+    timer_interrupt();
+    dummy = irqack;
+  }
 }
 
 /*
@@ -71,7 +73,7 @@ void platform_discard(void)
 __sfr __at 0xB0 rtc_secl;
 __sfr __at 0xB1 rtc_sech;
 
-uint8_t rtc_secs(void)
+uint8_t platform_rtc_secs(void)
 {
     uint8_t sl, rv;
     /* BCD encoded */

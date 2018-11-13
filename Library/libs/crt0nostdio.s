@@ -20,10 +20,6 @@
 		.globl _environ
 		.globl ___argv
 
-		.globl s__DATA
-		.globl l__DATA
-		.globl s__INITIALIZED
-
 		.area _CODE
 
 ; start at 0x100
@@ -51,13 +47,7 @@ start:		jp start2
 		.dw 0			; bss size
 		.dw 0			; spare
 
-start2:		ld hl, #l__DATA - 1	 ; work around linker limit
-		ld b, h
-		ld c, l
-		ld hl, #s__DATA
-		ld de, #s__DATA+1
-		ld (hl), #0
-		ldir
+start2:
 		call gsinit
 
 		ld hl, #4
@@ -68,9 +58,9 @@ start2:		ld hl, #l__DATA - 1	 ; work around linker limit
 		push hl
 		ld (___argv), hl	; needed for stuff like err()
 		push de
-		ld hl, #_exit		; return vector
+		call _main		; go
 		push hl
-		jp _main		; go
+		call _exit
 
 		.area _GSINIT
 gsinit:

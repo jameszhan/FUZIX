@@ -53,6 +53,7 @@
 
 /* On-board DS1302 on Mark IV, we can read the time of day from it */
 #define CONFIG_RTC
+#define CONFIG_RTC_FULL
 #define CONFIG_RTC_INTERVAL 30 /* deciseconds between reading RTC seconds counter */
 
 /* Memory backed devices */
@@ -82,3 +83,5 @@
 	/* ASCI0 as the console */
 	#define TTYDEV   (512+1)  /* System console (used by kernel, init) */
 #endif
+
+#define platform_copyright()

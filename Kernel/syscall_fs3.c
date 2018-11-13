@@ -80,18 +80,18 @@ arg_t _open(void)
 	perm = getperm(ino);
 	if ((r && !(perm & OTH_RD)) || (w && !(perm & OTH_WR))) {
 		udata.u_error = EACCES;
-		goto idrop;//cantopen;
+		goto idrop;
 	}
 	if (w) {
 		if (getmode(ino) == MODE_R(F_DIR)) {
 			udata.u_error = EISDIR;
-			goto idrop;//cantopen;
+			goto idrop;
 		}
 		/* Special case - devices on a read only file system may
 		   be opened read/write */
 		if (!isdevice(ino) && (ino->c_flags & CRDONLY)) {
 			udata.u_error = EROFS;
-			goto idrop;//cantopen;
+			goto idrop;
 		}
 	}
 
@@ -102,10 +102,8 @@ arg_t _open(void)
 		   by the call to dev_openi */
 
 		i_unlock(*iptr);
-		if (dev_openi(iptr, flag) != 0) {
-			i_deref(*iptr);
+		if (dev_openi(iptr, flag) != 0)
 			goto cantopen;
-		}
 		/* May have changed */
 		/* get the static pointer back in case it changed via dev 
 		   usage or just because we blocked */
@@ -147,7 +145,8 @@ arg_t _open(void)
 
 	return (uindex);
       idrop:
-	i_unlock_deref(ino);
+	i_unlock(ino);
+	/* Falls through and drops the reference count */
       cantopen:
 	oft_deref(oftindex);	/* This will call i_deref() */
       nooft:

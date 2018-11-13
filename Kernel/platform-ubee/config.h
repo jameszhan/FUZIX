@@ -12,25 +12,30 @@
 #undef CONFIG_SINGLETASK
 /* Video terminal, not a serial tty */
 #define CONFIG_VT
-/* Simple character addressed device (for now) */
-#define CONFIG_VT_SIMPLE
 /* Banked memory set up */
 #define CONFIG_BANK_FIXED
 #define MAX_MAPS	16		/* 512 KByte... */
 #define MAP_SIZE	0x8000
 
-#define CONFIG_NET
-#define CONFIG_NET_NATIVE
+/* Set these two for networking - no point right now */
+//#define CONFIG_NET
+//#define CONFIG_NET_NATIVE
+/* Set this for IDE */
+//#define CONFIG_IDE
+
+#define CONFIG_DYNAMIC_BUFPOOL
+#define CONFIG_DYNAMIC_SWAP
+#define CONFIG_LARGE_IO_DIRECT
+
+#define MAX_BLKDEV	4
 
 #define CONFIG_BANKS	2	/* 2 x 32K */
 
-/* Vt definitions. Eventually we need to sort this out and do mapping of
-   video, correct video attributes, mode setting etc */
-#define VT_BASE		((uint8_t *)0xF000)
+/* For now we don't support resizing */
 #define VT_WIDTH	80
-#define VT_HEIGHT	24
+#define VT_HEIGHT	25
 #define VT_RIGHT	79
-#define VT_BOTTOM	23
+#define VT_BOTTOM	24
 
 #define TICKSPERSEC 10	    /* Ticks per second */
 #define PROGBASE    0x0000  /* Base of user  */
@@ -38,6 +43,7 @@
 #define PROGTOP     0x7D00  /* Top of program, base of U_DATA stash */
 #define PROC_SIZE   32 	    /* Memory needed per process */
 
+#define SWAPDEV     (swap_dev)
 #define SWAP_SIZE   0x40 	/* 32K in blocks */
 #define SWAPBASE    0x0000	/* We swap the lot in one, include the */
 #define SWAPTOP	    0x8000	/* vectors so its a round number of sectors */
@@ -55,9 +61,9 @@
 /* Device parameters */
 #define NUM_DEV_TTY 1
 #define TTYDEV   BOOT_TTY /* Device used by kernel for messages, panics */
-#define SWAPDEV  (256)	  /* Device for swapping (1st hd). */
-#define NBUFS    10       /* Number of block buffers */
+#define NBUFS    5        /* Number of block buffers */
 #define NMOUNTS	 4	  /* Number of mounts at a time */
 
+extern unsigned int swap_dev;
 
-#define platform_discard()
+#define platform_copyright()

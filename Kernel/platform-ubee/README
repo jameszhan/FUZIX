@@ -5,19 +5,9 @@ First 64K
 	0000-00FF		Vectors
 	0100-01FF		Free
 	0200-wherever		Kernel
-	DB00			Discard
-	E400			Common
-	F000			Video
-
-(this will change once the video code is reworked to be)
-
-	0000-0100		Vectors
-	0100-0200		Free for now (IRQ stack ?)
-	0200-wherever		Kernel
-	wherever		Discard (turned into buffers)
-	F400			Common & Video
-
-	(Video overlaid temporarily on 8000-8FFF)
+		0x8000-0x8FFF	Video memory overlays here
+	DB00			Discard	(need to fix to reclaim buffers here)
+	F000			Common
 
 The other memory is then overlaid on 0000-7FFF for user space
 
@@ -25,6 +15,37 @@ The other memory is then overlaid on 0000-7FFF for user space
 	0100-7CFF		Application
 	7D00-7FFF		Udata/stack cache (may be able to move
 				oto 7DFF/7E00)
+	(User space sees video mapped at 0x8000-8FFF)
+
+
+Testing with uBee512
+
+Use the built Kernel/platform-ubee/fuzix.ss80 as a boot image
+
+cd Standalone/filesystem
+./build-mini-filesystem root.ds82 64 1600
+
+Then run either
+
+	ubee512 --model=256tc -a fuzix.ss80 -b root.ds82
+	ubee512	--model=p512k -a fuzix.ss80 -b root.ds82
+	ubee512 --model=p128k -a fuzix.ss80 -b root.ds82 --rtc=1 --piob7=rtc
+
+(as an RTC is required).
+
+and when asked for the root file system reply 1
+
+For a full on test of everything try something like
+
+ubee512 --model=p128k -a /tmp/fuzix.ss80 --hdd3=/tmp/root.ds82 --hdd0=$(pwd)/rootfs.hd3 --port58h --modio=+hdd --modio=+mem --rtc=1 --modio=+ide --piob7=rtc
+
+with a valid partitioned disk image including an 0x7F type partition that is
+512K or so for swap. The disk image needs to be a .hd3 type as the kernel right
+now assumes .hd3 geometry for ST506 drives (ie 62720 sectors)
+
+Don't expect the IDE to work - it may work on the real box but not the emulator.
+
+
 
 Done so far:
 
@@ -33,16 +54,8 @@ Done so far:
 - Basic initialization and setup, video and machine type probing
 - Sketch of various drivers
 - Basic floppy driver code
-
-To Do:
-- Floppy - media detect/sectors per track etc
 - Try mounting a file system on floppy
-- Debug TC keyboard code: shift/ctrl are busted - do we need repeat ?
-- Hard disk driver debug
-- Bank the video
 - Get init loading, load and test userspace
-- IDE driver (note the ubee512 emulator ide appears to be very busted as
-  on 5.8.0)
 - How to tell wd1010 system from 2793 from both with 0x58 switch
 	-	Select 0x58 = 0
 		See if track register writes to values
@@ -59,7 +72,7 @@ To Do:
 	If it mirrors to 0x41 then it's a 2793
 	If it writes/reads back but does not mirror it's a WD1002-5
 
-	Now check if writes to 0x45 affect 0x5 with 0x58 switched
+	Now check if writes to 0x45 affect 0x45 with 0x58 switched
 	(if so its two controllers and we can repeat the probe algorithm
 	for the other one)
 
@@ -69,18 +82,47 @@ To Do:
 
 	*Never write 0x41 while probing as it's precomp on the WD. 0x45
 	however is either cyl_high or track_w so safe
-
+- Support attributes, colour.
+- Buffer reclaim of discard memory
+- Bank the video
+- Debug TC keyboard code: shift/ctrl are busted
+- Non TC keyboard (lightpen keyboard)
+- Hard disk driver debug
+- IDE driver (note the ubee512 emulator ide appears to be very busted as
+  of 5.8.0)
 - If we have wd1002-5 and fd wtf do we put IDE in major/minors ?
+- Video support (colour, attributes)			DONE
+- Map video at 0x8000					DONE
+- Clear attribute ram if present			DONE
+- Move common up					DONE
+- Do buffer over discard change				DONE
+- Check we have video latches/map right everywhere	DONE
+- Init vtattr_cap and the video variables correctly	DONE (I think)
+- Check if scrolling in hw is doable or not in 80x25	NO
+- Support 'map video into my process at 0x8000 hack'	DONE
+- Non premium video					COLOUR DONE
+- Non premium video setup				COLOUR DONE
+- Support RAM font setting				DONE
+- Figure out how I broke the 6545 cursor		DONE
+- Debugging floppy driver - need to add direct I/O to user support	DONE
+- Swap							DONE
+- Graphics not just vt interfaces			DONE
+
+In Progress
+- RAM based fonts					DONE (needs testing)
+- Premium models sometimes hang somewhere as if there's a memory banking bug
+  (seems to be a size related Heisenbug)
+
+To Do:
+- Floppy - media detect/sectors per track etc/ hard skew
+- Fix reboot/panic logic
+- Keyboard repeat
+- Speed up RTC timer a bit for lpen based boxes so we don't miss keys
 
 Longer Term
-- Support attributes, colour, RAM based fonts (load the ROM one into RAM
-  customised for bold/italic ?)
-- Hardware 6x45 scrolling
 - Do delayed video output via a buffer off vblank event for non premium
-- Non TC keyboard (lightpen keyboard)
 - Proper support for Z80 PIO interfaces
 - Z8530 SCC
-- Graphics not just vt interfaces
 - Maybe eventually switch to soft interrupt model and support soft serial
   interrupts (ick)
 
@@ -117,7 +159,8 @@ There are three kinds of video
 
 Standard:
 	A 6545 with 2K of display memory and 128 8x16 ROM characters plus
-	128 in programmable character memory. No colour
+	128 in programmable character memory.
+	Colour option (includes flicker workaround)
 
 Premium:
 	The 6545 has
@@ -136,5 +179,7 @@ Premium:
 
 High resolution video is sort of MSX like but cruder. The character memory is
 filled with unique character codes and the character ram is loaded with the
-bit patterns.
+bit patterns. Also it's banked and banked so will be horrible to program and
+we'll need graphics mode support for other modes
+
 

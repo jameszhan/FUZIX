@@ -1,13 +1,13 @@
 ;
 ;	6502 version
 ;
-        .export _switchout
+        .export _platform_switchout
         .export _switchin
         .export _dofork
 	.export _ramtop
 
 	.import _chksigs
-	.import _trap_monitor
+	.import _platform_monitor
 
 	.import map_kernel
 	.import _swapper
@@ -39,13 +39,9 @@ _ramtop:
 ; restarted after calling switchout, it thinks it has just returned
 ; from switchout().
 ;
-; FIXME: make sure we optimise the switch to self case higher up the stack!
-; 
-; This function can have no arguments or auto variables.
-_switchout:
+_platform_switchout:
 	sei
 
-        jsr _chksigs
 ;
 ;	Put the C stack on the CPU stack, and store that in U_SP
 ;
@@ -68,7 +64,7 @@ _switchout:
         jsr _getproc
         jsr _switchin
         ; we should never get here
-        jsr _trap_monitor
+        jsr _platform_monitor
 
 badswitchmsg: .byte "_switchin: FAIL"
 	.byte 13, 10, 0
@@ -202,7 +198,7 @@ switchinfail:
 	ldx	#>badswitchmsg
         jsr outstring
 	; something went wrong and we didn't switch in what we asked for
-        jmp _trap_monitor
+        jmp _platform_monitor
 
 
 ;

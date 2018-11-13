@@ -10,7 +10,7 @@ static unsigned int s__CODE, s__CODE2, s__INITIALIZER, s__DATA,
     s__INITIALIZED, s__INITIALIZER, s__COMMONMEM, s__VIDEO, l__INITIALIZED,
     l__GSFINAL, l__GSINIT, l__COMMONMEM, s__FONT, l__FONT, s__DISCARD,
     l__DISCARD, l__CODE, l__CODE2, l__VIDEO, l__DATA, s__CONST, l__CONST,
-    s__HEAP, l__HEAP;
+    s__HEAP, l__HEAP, s__PAGE0 = 0xFFFF;
 
 
 static void ProcessMap(FILE * fp)
@@ -73,6 +73,8 @@ static void ProcessMap(FILE * fp)
 			sscanf(p1, "%x", &s__HEAP);
 		if (strcmp(p2, "l__HEAP") == 0)
 			sscanf(p1, "%x", &l__HEAP);
+		if (strcmp(p2, "s__PAGE0") == 0)
+			sscanf(p1, "%x", &s__PAGE0);
 	}
 }
 
@@ -82,9 +84,10 @@ int main(int argc, char *argv[])
 	FILE *map, *bin;
 	int tail = 0;
 	int start;
-	unsigned int end;
+	unsigned int end = 0;
 	int reloc = 0;
 	int pack_discard = 0;
+	int no_pack = 0;
 	int base;
 
 	if (argc != 4) {
@@ -121,8 +124,10 @@ int main(int argc, char *argv[])
 	}
 
 	/* linker will allow us to overlap _DISCARD (which may grow)
-	   with _COMMONMEM. */
-	if(s__DISCARD && s__DISCARD+l__DISCARD > s__COMMONMEM){
+	   with _COMMONMEM. Don't however worry if DISCARD is above common
+	   as can happen in some odder layouts */
+	if(s__DISCARD && s__DISCARD+l__DISCARD > s__COMMONMEM &&
+		s__DISCARD < s__COMMONMEM + l__COMMONMEM) {
 		fprintf(stderr, "Move _DISCARD down by at least %d bytes\n",
 			s__DISCARD + l__DISCARD - s__COMMONMEM);
 		exit(1);
@@ -131,8 +136,8 @@ int main(int argc, char *argv[])
 	   then the compiler will have messed it up. Even though we then
 	   copy the initializers into initialized we can only use the space
 	   for bss */
-	if (s__DISCARD && s__DISCARD + l__DISCARD >= s__INITIALIZER &&
-		s__INITIALIZER + l__INITIALIZED >= s__DISCARD) {
+	if (s__DISCARD && s__DISCARD + l__DISCARD > s__INITIALIZER &&
+		s__INITIALIZER + l__INITIALIZED > s__DISCARD) {
 		fprintf(stderr, "Initializer will have overwritten DISCARD\n");
 		exit(1);
 	}
@@ -150,6 +155,16 @@ int main(int argc, char *argv[])
 
 	/* Our standard layout begins with the code */
 	start = s__CODE;
+
+	/* Special case for 32K/32K layouts. We have a high and a low page
+	   and we need to pack the entire binary space. We can revist this
+	   later but for now it's good enough */
+	if (s__PAGE0 != 0xFFFF) {
+		pack_discard = 0;
+		start = 0;
+		end = 0xFFFF;
+		no_pack = 1;
+	}
 
 	/* TODO: Support a proper discardable high discard in other mappings */
 
@@ -173,11 +188,17 @@ int main(int argc, char *argv[])
 	        pack_discard = 1;
         }
 
-	end = s__INITIALIZER;
+	if (end < s__INITIALIZER)
+		end = s__INITIALIZER;
 	if (end < start) {
 		/* We are dealing with an unpacked binary where the end
 		   will instead be _HEAP */
 		end = s__HEAP;
+	}
+	if (end < s__DATA) {
+		/* Image with data highest */
+		end  = s__DATA;
+		pack_discard = 0;
 	}
 
 	if (s__CODE2 < 0x10000) {
@@ -190,7 +211,7 @@ int main(int argc, char *argv[])
 				argv[1]);
 		/* Pack any common memory on the end of the main code/memory if its
 		   relocated */
-		if (!s__DISCARD || pack_discard) {
+		if (!no_pack && (!s__DISCARD || pack_discard)) {
 		        base = s__DATA;
 			tail = l__COMMONMEM;
 			memcpy(out + base, buf + s__COMMONMEM,
@@ -247,7 +268,7 @@ int main(int argc, char *argv[])
 		        end = s__COMMONMEM + l__COMMONMEM;
 
                 /* Packed image with common over data */
-		if (!s__DISCARD || pack_discard) {
+		if (!no_pack && (!s__DISCARD || pack_discard)) {
 			end = base;
 			printf("\nPacked image %d bytes, for RAM target\n",
 			       end);

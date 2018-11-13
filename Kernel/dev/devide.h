@@ -12,7 +12,8 @@
    supports (at most 16) - defaults to 2 if undefined.
 
    Define IDE_8BIT_ONLY if the system implements only half of the 16-bit data
-   bus (eg n8vem-mark4).
+   bus (eg n8vem-mark4). You can define IDE_IS_8BIT(iface) if you have a mix
+   of types. FIXME: we should rename IDE_8BIT_ONLY.
 
    Define IDE_REG_INDIRECT if the IDE registers are not directly addressable on
    your platform. If you do not define IDE_REG_INDIRECT then IDE registers
@@ -91,14 +92,22 @@ void devide_writeb(uint8_t regaddr, uint8_t value);
 #define IDE_CMD_IDENTIFY        0xEC
 #define IDE_CMD_SET_FEATURES    0xEF
 
+#ifndef IDE_DRIVE_NR_MASK
+#define IDE_DRIVE_NR_MASK    0x0F   /* low bit used to select master/slave */
+#endif
+
 #ifdef _IDE_PRIVATE
 
 #ifndef IDE_DRIVE_COUNT
-#define IDE_DRIVE_COUNT 2       /* at most 16 drives without adjusting DRIVE_NR_MASK */
+#define IDE_DRIVE_COUNT 2       /* at most 16 drives without adjusting IDE_DRIVE_NR_MASK */
+#endif
+
+/* Only used when 8BIT_ONLY defined */
+#ifndef IDE_IS_8BIT
+#define IDE_IS_8BIT(x)	(1)
 #endif
 
 /* we use the bits in the driver_data field of blkdev_t as follows: */
-#define DRIVE_NR_MASK    0x0F   /* low bit used to select master/slave */
 #define FLAG_CACHE_DIRTY 0x40
 #define FLAG_WRITE_CACHE 0x80
 
@@ -127,24 +136,28 @@ extern void devide_read_data(void);
 
 #else /* !MMIO */
 
+#ifndef IDE_SFR
+#define IDE_SFR __sfr
+#endif
+
 #ifdef IDE_REG_ALTSTATUS
-__sfr __at IDE_REG_ALTSTATUS ide_reg_altstatus;
+IDE_SFR __at IDE_REG_ALTSTATUS ide_reg_altstatus;
 #endif
 #ifdef IDE_REG_CONTROL
-__sfr __at IDE_REG_CONTROL   ide_reg_control;
+IDE_SFR __at IDE_REG_CONTROL   ide_reg_control;
 #endif
-__sfr __at IDE_REG_COMMAND   ide_reg_command;
-__sfr __at IDE_REG_DATA      ide_reg_data;
-__sfr __at IDE_REG_DEVHEAD   ide_reg_devhead;
-__sfr __at IDE_REG_ERROR     ide_reg_error;
-__sfr __at IDE_REG_FEATURES  ide_reg_features;
-__sfr __at IDE_REG_LBA_0     ide_reg_lba_0;
-__sfr __at IDE_REG_LBA_1     ide_reg_lba_1;
-__sfr __at IDE_REG_LBA_2     ide_reg_lba_2;
-__sfr __at IDE_REG_LBA_3     ide_reg_lba_3;
-__sfr __at IDE_REG_SEC_COUNT ide_reg_sec_count;
-__sfr __at IDE_REG_STATUS    ide_reg_status;
+IDE_SFR __at IDE_REG_COMMAND   ide_reg_command;
+IDE_SFR __at IDE_REG_DATA      ide_reg_data;
+IDE_SFR __at IDE_REG_DEVHEAD   ide_reg_devhead;
+IDE_SFR __at IDE_REG_ERROR     ide_reg_error;
+IDE_SFR __at IDE_REG_FEATURES  ide_reg_features;
+IDE_SFR __at IDE_REG_LBA_0     ide_reg_lba_0;
+IDE_SFR __at IDE_REG_LBA_1     ide_reg_lba_1;
+IDE_SFR __at IDE_REG_LBA_2     ide_reg_lba_2;
+IDE_SFR __at IDE_REG_LBA_3     ide_reg_lba_3;
+IDE_SFR __at IDE_REG_SEC_COUNT ide_reg_sec_count;
+IDE_SFR __at IDE_REG_STATUS    ide_reg_status;
 #endif /* MMIO */
 #endif /* IDE_REG_INDIRECT */
-#endif /* IDE_PRIVAYTE */
+#endif /* IDE_PRIVATE */
 #endif

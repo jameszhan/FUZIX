@@ -5,10 +5,14 @@
 
 static void close_on_exec(void)
 {
-	int j;
+	/* Keep the mask separate to stop SDCC generating crap code */
+	uint16_t m = 1 << (UFTSIZE - 1);
+	int8_t j;
+
 	for (j = UFTSIZE - 1; j >= 0; --j) {
-		if (udata.u_cloexec & (1 << j))
+		if (udata.u_cloexec & m)
 			doclose(j);
+		m >>= 1;
 	}
 	udata.u_cloexec = 0;
 }
@@ -105,12 +109,18 @@ arg_t _execve(void)
 	/* FIXME: review overflows */
 	bin_size = ino->c_node.i_size;
 	progptr = bin_size + 1024 + bss;
-	if (top - progload < progptr || progptr < bin_size) {
+	if (progload < PROGLOAD || top - progload < progptr || progptr < bin_size) {
 		udata.u_error = ENOMEM;
 		goto nogood2;
 	}
 
 	udata.u_ptab->p_status = P_NOSLEEP;
+
+	/* If we made pagemap_realloc keep hold of some defined area we
+	   could in theory just move the arguments up or down as part of
+	   the process - that would save us all this hassle but replace it
+	   with new hassle */
+
 	/* Gather the arguments, and put them in temporary buffers. */
 	abuf = (struct s_argblk *) tmpbuf();
 	/* Put environment in another buffer. */

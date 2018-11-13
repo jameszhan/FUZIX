@@ -19,18 +19,23 @@
 	    .globl platform_interrupt_all
 
 	    .globl map_kernel
+	    .globl map_kernel_di
 	    .globl map_process
+	    .globl map_process_di
 	    .globl map_process_always
+	    .globl map_process_always_di
 	    .globl map_process_a
-	    .globl map_save
+	    .globl map_save_kernel
 	    .globl map_restore
 
 	    .globl _fd_bankcmd
 
-	    .globl _trap_reboot
+	    .globl _int_disabled
+
+	    .globl _platform_reboot
 
             ; exported debugging tools
-            .globl _trap_monitor
+            .globl _platform_monitor
             .globl outchar
 
             ; imported symbols
@@ -63,13 +68,13 @@
 ; -----------------------------------------------------------------------------
             .area _COMMONMEM
 
-_trap_monitor:
+_platform_monitor:
 	    ld a, #128
 	    out (29), a
 platform_interrupt_all:
 	    ret
 
-_trap_reboot:
+_platform_reboot:
 	    ld a, #1
 	    out (29), a
 
@@ -82,15 +87,16 @@ _fd_bankcmd:pop de		; return
 	    push hl
 	    push bc
 	    push de		; fix stack
-	    ld a, i
+	    ld a, (_int_disabled)
 	    di
 	    push af		; save DI state
-	    call map_process	; HL alread holds our bank
+	    call map_process_di	; HL alread holds our bank
 	    ld a, c		; issue the command
 	    out (13), a		;
-	    call map_kernel	; return to kernel mapping
+	    call map_kernel_di	; return to kernel mapping
 	    pop af
-	    ret po
+	    or a
+	    ret nz
 	    ei
 	    ret
 
@@ -133,6 +139,8 @@ init_hardware:
 
             .area _COMMONMEM
 
+_int_disabled:
+	    .byte 1
 
 _program_vectors:
             ; we are called, with interrupts disabled, by both newproc() and crt0
@@ -182,12 +190,14 @@ _program_vectors:
 
             ; put the paging back as it was -- we're in kernel mode so this is predictable
 map_kernel:
+map_kernel_di:
 	    push af
 	    xor a
 	    out (21), a
 	    pop af
             ret
 map_process:
+map_process_di:
 	    ld a, h
 	    or l
 	    jr z, map_kernel
@@ -196,15 +206,18 @@ map_process_a:
 	    out (21), a
             ret
 map_process_always:
+map_process_always_di:
 	    push af
 	    ld a, (U_DATA__U_PAGE)
 	    out (21), a
 	    pop af
 	    ret
-map_save:
+map_save_kernel:
 	    push af
 	    in a, (21)
 	    ld (map_store), a
+	    xor a
+	    out (21),a
 	    pop af
 	    ret	    
 map_restore:
@@ -340,8 +353,7 @@ badstack_doirq:
 	    out (23),a			; MMU off so we can do our job
 ;	    ld a,#'!'
 ;	    call outchar
-	    call map_save
-	    call map_kernel
+	    call map_save_kernel
 	    ld hl,#9
 	    push hl
 	    ld hl,(U_DATA__U_PTAB)

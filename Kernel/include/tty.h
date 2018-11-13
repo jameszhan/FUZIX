@@ -43,6 +43,8 @@ struct termios {
 #define PARMRK	0x0800
 #define IXON	0x1000
 
+#define _ISYS	(ICRNL|INLCR|ISTRIP)	/* Flags supported by core */
+
 #define OPOST	0x0001	/* Supported */
 #define OLCUC	0x0002
 #define ONLCR	0x0004	/* Supported */
@@ -71,6 +73,8 @@ struct termios {
 #define FFDLY	0x2000
 #define FF0	0x0000
 #define FF1	0x2000
+
+#define _OSYS	(OPOST|ONLCR|OCRNL)
 
 #define B0	0x0000
 #define B50	0x0001
@@ -103,6 +107,8 @@ struct termios {
 #define CRTSCTS 0x1000
 #define CBAUD	0x000F
 
+#define _CSYS	(CREAD|HUPCL|CLOCAL)
+
 #define ECHO	0x0001	/* Supported */
 #define ECHOE	0x0002	/* Supported */
 #define ECHOK	0x0004	/* Supported */
@@ -113,6 +119,8 @@ struct termios {
 #define NOFLSH	0x0080
 #define TOSTOP	0x0100
 #define XCASE	0x0200
+
+#define _LSYS	(ECHO|ECHOE|ECHOK|ICANON|ISIG)
 
 #define TCSANOW		0
 #define TCSADRAIN	1
@@ -152,6 +160,12 @@ struct termios {
 #define VTATTRS		0x24
 #define KBRATE		0x25
 
+#define VTFONTINFO	0x30
+#define VTSETFONT	(0x31|IOCTL_SUPER)
+#define VTGETFONT	0x32
+#define VTSETUDG	0x33
+#define VTGETUDG	0x34
+
 /* Fuzix systems to level 2 have 256 byte tty buffers as per standards, level 1
    boxes may not */
 #if defined(CONFIG_LEVEL_2)
@@ -168,6 +182,22 @@ struct winsize {		/* Keep me 8bytes on small boxes */
     unsigned short ws_col;
     unsigned short ws_xpixel;
     unsigned short ws_ypixel;
+};
+
+struct fontinfo {
+    uint8_t font_low;
+    uint8_t font_high;
+    uint8_t udg_low;
+    uint8_t udg_high;
+    uint8_t format;
+#define FONT_INFO_8X8	0
+#define FONT_INFO_6X8	1
+#define FONT_INFO_4X8	2	/* packed twice in each byte */
+#define FONT_INFO_4X6	3
+#define FONT_INFO_8X11P16  4	/* 8 x 11 but packed 16 line packed */
+#define FONT_INFO_8X16	5
+#define FONT_INFO_6X12P16  6	/* 6x12 on 16 byte boundaries
+				   16 line packed, low 6 bits */
 };
 
 /* Group the tty into a single object. That lets 8bit processors keep all
@@ -190,6 +220,7 @@ struct tty {
 #define CTRL(x)		((x)&0x1F)
 
 extern struct tty ttydata[NUM_DEV_TTY + 1];
+extern tcflag_t *termios_mask[NUM_DEV_TTY + 1];
 
 extern void tty_init(void);
 
@@ -236,8 +267,9 @@ extern struct s_queue ttyinq[NUM_DEV_TTY + 1];
 extern ttyready_t tty_writeready(uint8_t minor);
 extern void tty_sleeping(uint8_t minor);
 extern void tty_putc(uint8_t minor, unsigned char c);
-extern void tty_setup(uint8_t minor);
+extern void tty_setup(uint8_t minor, uint8_t flags);
 extern int tty_carrier(uint8_t minor);
+extern void tty_data_consumed(uint8_t minor);
 /* PTY pieces: 8 ptys both sides of */
 #ifdef CONFIG_PTY_DEV
 #define PTY_BUFFERS \

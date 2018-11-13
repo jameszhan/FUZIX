@@ -1,23 +1,41 @@
+CROSS_CCOPTS += -I../dev/
+
 
 CSRCS = devlpr.c devtty.c devfd.c devhd.c
-CSRCS += devices.c main.c
+CSRCS += devices.c main.c vt.c ide.c
+
+DISCSRCS = discard.c
 
 ASRCS = ubee.s crt0.s
 ASRCS += tricks.s commonmem.s floppy.s
+
+DISCARD_DSRCS = ../dev/devide_discard.c
+DSRCS = ../dev/blkdev.c ../dev/devide.c ../dev/mbr.c
 
 NSRCS = ../dev/net/net_native.c
 
 COBJS = $(CSRCS:.c=.rel)
 AOBJS = $(ASRCS:.s=.rel)
 NOBJS = $(patsubst ../dev/net/%.c,%.rel, $(NSRCS))
-OBJS  = $(COBJS) $(AOBJS) $(NOBJS)
+DISCOBJS = $(DISCSRCS:.c=.rel)
+DISCARD_DOBJS = $(patsubst ../dev/%.c,%.rel, $(DISCARD_DSRCS))
+DOBJS = $(patsubst ../dev/%.c,%.rel, $(DSRCS))
 
-JUNK = $(CSRCS:.c=.lst) $(CSRCS:.c=.asm) $(CSRCS:.c=.sym) $(ASRCS:.s=.lst) $(ASRCS:.s=.sym) $(CSRCS:.c=.rst) $(ASRCS:.s=.rst)
+OBJS  = $(COBJS) $(AOBJS) $(NOBJS) $(DISCOBJS) $(DOBJS) $(DISCARD_DOBJS)
 
 all:	$(OBJS)
 
 $(COBJS): %.rel: %.c
 	$(CROSS_CC) $(CROSS_CCOPTS) -c $<
+
+$(DISCOBJS): %.rel: %.c
+	$(CROSS_CC) $(CROSS_CCOPTS) $(CROSS_CC_SEGDISC) -c $<
+
+$(DOBJS): %.rel: ../dev/%.c
+	$(CROSS_CC) $(CROSS_CCOPTS) -c $<
+
+$(DISCARD_DOBJS): %.rel: ../dev/%.c
+	$(CROSS_CC) $(CROSS_CCOPTS) $(CROSS_CC_SEGDISC) -c $<
 
 $(NOBJS): %.rel: ../dev/net/%.c
 	$(CROSS_CC) $(CROSS_CCOPTS) -c $<
@@ -26,7 +44,8 @@ $(AOBJS): %.rel: %.s
 	$(CROSS_AS) $(ASOPTS) $<
 
 clean:
-	rm -f $(OBJS) $(JUNK)  core *~  fuzix.ss80 bootstrap.bin
+	rm -f $(OBJS) *.lst *.asm *.sym *.rst *.lk  core *~
+	rm -f fuzix.ss80 bootstrap.bin
 
 image:
 	sdasz80 -o bootstrap.s
@@ -38,4 +57,3 @@ image:
 	dd if=/dev/zero of=fuzix.ss80 bs=512 count=800
 	dd if=bootstrap.bin of=fuzix.ss80 conv=notrunc
 	dd if=../fuzix.bin of=fuzix.ss80 bs=512 seek=1 conv=notrunc
-#	dd if=hellotest.bin of=fuzix.ss80 bs=512 seek=1 conv=notrunc

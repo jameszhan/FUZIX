@@ -1,16 +1,12 @@
-CC = fcc
-ASM = sdasz80
+CC = fcc -m$(USERCPU)
+ASM ?= sdasz80
 AR = sdar
 LINKER = sdldz80
 # This gets set for 'awkward' devices like ZX128
 #PLATFORM = -zx128
 PLATFORM =
 export PLATFORM
-#CC_OPT = -mz80 -c --opt-code-size --std-c99 --max-allocs-per-node 2000000 -I../include
-#CC_OPT = -mz80 --std-c99 -c --opt-code-size --max-allocs-per-node 20000 -I../include -I../../Kernel/include
-# for stuff that gives sdcc nightmares
-#CC_NOOPT = -mz80 --std-c99 -c --opt-code-size --max-allocs-per-node 1000 -I../include
-CC_OPT = -O2 -c
+CC_OPT = $(FUZIX_CCOPTS) -c
 CC_NOOPT = -c
 ASM_OPT = -l -o -s
 LINKER_OPT = -m -i -o
@@ -18,13 +14,17 @@ SRC_CRT0 = crt0$(PLATFORM).s
 OBJ_CRT0 = $(SRC_CRT0:.s=.rel)
 SRC_CRT0NS = crt0nostdio$(PLATFORM).s
 OBJ_CRT0NS = $(SRC_CRT0NS:.s=.rel)
-SRC_ASM = enter.s htonl-z80.s htons-z80.s
+SRC_CRT0R = crt0$(PLATFORM)_z80_rel.s
+OBJ_CRT0R = $(SRC_CRT0R:.s=.rel)
+SRC_CRT0NSR = crt0nostdio$(PLATFORM)_z80_rel.s
+OBJ_CRT0NSR = $(SRC_CRT0NSR:.s=.rel)
+SRC_ASM = enter.s htonl-$(USERCPU).s htons-$(USERCPU).s
 OBJ_ASM = $(SRC_ASM:.s=.rel)
-SRC_C =  __argv.c a64l.c abort.c asctime.c assert.c atexit.c atoi_small.c
+SRC_C =  __argv.c a64l.c abort.c aes256.c asctime.c assert.c atexit.c atoi_small.c
 SRC_C += bcmp.c bcopy.c bsearch.c bzero.c calloc.c cfree.c clock.c closedir.c
 SRC_C += closedir_r.c clock_gettime.c clock_getres.c clock_settime.c
 SRC_C += creat.c crypt.c ctermid.c ctime.c cuserid.c
-SRC_C += difftime.c drand48.c err.c errno.c error.c
+SRC_C += drand48.c err.c errno.c error.c
 SRC_C += execl.c execv.c execvp.c exit.c
 SRC_C += fclose.c fdatasync.c fflush.c fgetc.c fgetgrent.c fgetpwent.c
 SRC_C += fgetpos.c fgets.c fopen.c fork.c fprintf.c fputc.c fputs.c fread.c
@@ -42,13 +42,14 @@ SRC_C += opendir.c opendir_r.c pause.c perror.c
 SRC_C += popen.c printf.c putenv.c putgetch.c putpwent.c putw.c pwent.c qsort.c
 SRC_C += raise.c rand.c readdir.c readlink.c realloc.c recv.c
 SRC_C += recvfrom.c regerror.c
-SRC_C += regsub.c remount.c remove.c rewind.c rewinddir.c rindex.c seekdir.c
+SRC_C += regsub.c remount.c remove.c rewind.c rewinddir.c rindex.c
+SRC_C += rootmntent.c seekdir.c
 SRC_C += send.c sendto.c setbuffer.c setenv.c
 SRC_C += setlocale.c setvbuf.c settimeofday.c sgetl.c sleep.c sprintf.c
 SRC_C += sputl.c stat.c stdio0.c stime.c
 SRC_C += strcasecmp.c strcasestr.c strdup.c stricmp.c strlcpy.c strncasecmp.c
 SRC_C += strnlen.c strnicmp.c strsep.c strxfrm.c strcoll.c strsignal.c
-SRC_C += strtod.c strtol.c swab.c system.c telldir.c
+SRC_C += strtod.c strtok_r.c strtol.c swab.c system.c telldir.c
 SRC_C += tfind.c time.c tmpfile.c tmpnam.c tsearch.c ttyname.c
 SRC_C += tzset.c umount.c ungetc.c usleep.c utent.c utimes.c utsname.c
 SRC_C += vfprintf.c vprintf.c wait.c xitoa.c pathconf.c
@@ -92,6 +93,8 @@ SRC_TM = tinymalloc.c
 
 SRC_RES = resolv.c
 
+SRC_READLINE = readline.c readline_fn.c
+
 OBJ_C = $(SRC_C:.c=.rel)
 OBJ_CURS = $(SRC_CURS:.c=.rel)
 OBJ_CT = $(SRC_CT:.c=.rel)
@@ -100,30 +103,37 @@ OBJ_TM = $(SRC_TM:.c=.rel)
 OBJ_HARD = $(SRC_HARD:.c=.rel)
 OBJ_ALL = $(OBJ_ASM) $(OBJ_C) $(OBJ_HARD)
 OBJ_RES = $(SRC_RES:.c=.rel)
+OBJ_READLINE = $(SRC_READLINE:.c=.rel)
 
-all: syslib$(PLATFORM).lib crt0$(PLATFORM).rel crt0nostdio$(PLATFORM).rel liberror.txt curses$(PLATFORM).lib termcap$(PLATFORM).lib m$(PLATFORM).lib tinymalloc$(PLATFORM).lib resolv$(PLATFORM).lib
+all: c$(PLATFORM).lib crt0$(PLATFORM).rel crt0nostdio$(PLATFORM).rel \
+     crt0$(PLATFORM)_z80_rel.rel crt0nostdio$(PLATFORM)_z80_rel.rel \
+     liberror.txt curses$(PLATFORM).lib termcap$(PLATFORM).lib \
+     m$(PLATFORM).lib tinymalloc$(PLATFORM).lib resolv$(PLATFORM).lib \
+     readline$(PLATFORM).lib
 
 libc.l:%.l:$(OBJ_ALL)
 	ls $(OBJ_ALL) > libc.l
 
 syscall.l: fuzix/syslib.l
-	../tools/syscall
-	(cd fuzix; $(MAKE))
-	cat fuzix/syslib.l | tr " " "\\n" | sed -e "s/^/fuzix\//" >syscall.l
+	../tools/syscall $(USERCPU)
+	(cd fuzix$(USERCPU); $(MAKE))
+	cat fuzix$(USERCPU)/syslib.l | tr " " "\\n" | sed -e "s/^/fuzix"$(USERCPU)"\//" >syscall.l
 
-sdccz80.lib:
-	../tools/libclean
+sdcc$(USERCPU).lib:
+	../tools/libclean $(USERCPU)
 
-syslib$(PLATFORM).lib: syscall.l libc.l sdccz80.lib
+syslib$(PLATFORM).lib: syscall.l libc.l sdcc$(USERCPU).lib
 	cat libc.l syscall.l >syslib.l
-	cp sdccz80.lib syslib$(PLATFORM).lib
+	cp sdcc$(USERCPU).lib syslib$(PLATFORM).lib
 	$(AR) rc syslib$(PLATFORM).lib @syslib.l
 	$(AR) s syslib$(PLATFORM).lib
+
+c$(PLATFORM).lib: syslib$(PLATFORM).lib
 	ln -sf syslib$(PLATFORM).lib c$(PLATFORM).lib
 
 fuzix/syslib.l:
-	../tools/syscall
-	$(MAKE) -C fuzix
+	../tools/syscall $(USERCPU)
+	$(MAKE) -C fuzix$(USERCPU)
 
 liberror.txt:
 	../tools/liberror > liberror.txt
@@ -148,6 +158,10 @@ resolv$(PLATFORM).lib: $(OBJ_RES)
 	$(AR) rc resolv$(PLATFORM).lib $(OBJ_RES)
 	$(AR) s resolv$(PLATFORM).lib
 
+readline$(PLATFORM).lib: $(OBJ_READLINE)
+	$(AR) rc readline$(PLATFORM).lib $(OBJ_READLINE)
+	$(AR) s readline$(PLATFORM).lib
+
 $(OBJ_ASM):%.rel: %.s
 	$(ASM) $(ASM_OPT) $@ $(@:.rel=.s)
 
@@ -155,6 +169,12 @@ $(OBJ_CRT0):%.rel: %.s
 	$(ASM) $(ASM_OPT) $@ $(@:.rel=.s)
 
 $(OBJ_CRT0NS):%.rel: %.s
+	$(ASM) $(ASM_OPT) $@ $(@:.rel=.s)
+
+$(OBJ_CRT0R):%.rel: %.s
+	$(ASM) $(ASM_OPT) $@ $(@:.rel=.s)
+
+$(OBJ_CRT0NSR):%.rel: %.s
 	$(ASM) $(ASM_OPT) $@ $(@:.rel=.s)
 
 $(OBJ_C):%.rel: %.c
@@ -175,15 +195,20 @@ $(OBJ_TM):%.rel: %.c
 $(OBJ_RES):%.rel: %.c
 	$(CC) $(CC_OPT) $(@:.rel=.c)
 
+$(OBJ_READLINE):%.rel: %.c
+	$(CC) $(CC_OPT) $(@:.rel=.c)
+
 $(OBJ_HARD):%.rel: %.c
 	$(CC) $(CC_NOOPT) $(@:.rel=.c)
 
 clean:
 	rm -rf *.rel *.asm *.sym *.lst *.lib *~ syscall.l  libc.l syslib.l liberror.txt *.o
 	(cd curses; rm -rf *.rel *.asm *.sym *.lst *~ *.o)
-	(cd fuzix; $(MAKE) clean)
+	(cd fuzixz80; $(MAKE) clean; rm -f Makefile)
 
 install:
 	cp crt0$(PLATFORM).rel crt0nostdio$(PLATFORM).rel c$(PLATFORM).lib /opt/fcc/lib/
 	cp curses$(PLATFORM).lib termcap$(PLATFORM).lib /opt/fcc/lib/
 	cp m$(PLATFORM).lib tinymalloc$(PLATFORM).lib /opt/fcc/lib/
+	cp readline$(PLATFORM).lib /opt/fcc/lib/
+	cp crt0$(PLATFORM)_z80_rel.rel crt0nostdio$(PLATFORM)_z80_rel.rel /opt/fcc/lib/

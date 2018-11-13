@@ -1,0 +1,7 @@
+umask 022
+fsck -a /
+dwdate -s || setdate
+remount -n / rw
+prtroot >/etc/mtab
+mount -a
+>/var/run/utmp

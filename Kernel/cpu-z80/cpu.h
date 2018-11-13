@@ -23,7 +23,7 @@ typedef uint16_t uptr_t;		/* Userspace pointer equivalent */
 typedef uint16_t irqflags_t;
 
 extern void out(uint8_t addr, uint8_t val);
-extern uint8_t in(uint8_t addr);
+extern uint8_t in(uint8_t addr) __z88dk_fastcall;
 
 /* Z80 binaries start with a JP */
 #define EMAGIC    0xc3    /* Header of executable */
@@ -47,6 +47,8 @@ extern char *strncpy(char *dest, const char *src, size_t n);
 extern char *strchr(const char *s, int c);
 extern void *memset(void *dest, int c, size_t n);
 #endif
+/* There is no compiler optimized inline memmove */
+extern void *memmove(void *dest, const void *src, size_t n);
 
 extern int16_t strlen(const char *p);
 
@@ -87,3 +89,8 @@ typedef union {            /* this structure is endian dependent */
 
 /* Deal with SDCC code gen issue */
 #define HIBYTE32(x)	(((uint8_t *)&(x))[3])
+
+/* SDCC does not support attribute(packed) but then it also doesn't insert
+   padding either */
+
+#define __packed

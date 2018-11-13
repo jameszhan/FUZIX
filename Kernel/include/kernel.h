@@ -40,6 +40,10 @@ From UZI by Doug Braun and UZI280 by Stefan Nitschke.
 #define ALIGNDOWN(v) (v)
 #endif
 
+#ifndef FS_MAX_SHIFT
+#define FS_MAX_SHIFT	0
+#endif
+
 /* These work fine for most compilers but can be overriden for those where the
    resulting code generation is foul */
 #ifndef LOWORD
@@ -83,6 +87,8 @@ From UZI by Doug Braun and UZI280 by Stefan Nitschke.
 #define CPUTYPE_68HC11	6
 #define CPUTYPE_8086	7
 #define CPUTYPE_65C816	8
+#define CPUTYPE_R2K	9
+#define CPUTYPE_Z280	10
 
 /* Maximum UFTSIZE can be is 16, then you need to alter the O_CLOEXEC code */
 
@@ -108,8 +114,9 @@ From UZI by Doug Braun and UZI280 by Stefan Nitschke.
 
 
 #ifndef MAXTICKS
-#define MAXTICKS     10   /* Max ticks before switching out (time slice)
-                            default process time slice */
+#define MAXTICKS     (TICKSPERSEC/10)
+                           /* Max ticks before switching out (time slice)
+                              default process time slice */
 #endif
 
 // #define MAXBACK      3   /* Process time slice for tasks not connected
@@ -205,6 +212,7 @@ typedef struct blkbuf {
     uget((uaddr),(buf)->__bf_data + (off), (len))
 #define blkptr(buf, off, len)	((void *)((buf)->__bf_data + (off)))
 #define blkzero(buf)		memset(buf->__bf_data, 0, BLKSIZE)
+#define tmpfree(x)	brelse((void *)x)
 #else
 extern void blktok(void *kaddr, struct blkbuf *buf, uint16_t off, uint16_t len);
 extern void blkfromk(void *kaddr, struct blkbuf *buf, uint16_t off, uint16_t len);
@@ -213,6 +221,7 @@ extern void blkfromu(void *kaddr, struct blkbuf *buf, uint16_t off, uint16_t len
 /* Worst case is needing to copy over about 64 bytes */
 extern void *blkptr(struct blkbuf *buf, uint16_t offset, uint16_t len);
 extern void blkzero(struct blkbuf *buf);
+extern void tmpfree(void *p);
 #endif
 
 /* TODO: consider smaller inodes or clever caching. 2BSD uses small
@@ -291,6 +300,10 @@ typedef struct cinode {
 #define CFLOCK		0x0F	/* flock bits */
 #define CFLEX		0x0F	/* locked exclusive */
 #define CFMAX		0x0E	/* highest shared lock count permitted */
+   uint8_t     c_super;		/* Superblock index */
+#ifdef CONFIG_BLOCK_SLEEP
+   uint16_t    c_lock;		/* inode lock state */
+#endif
 } cinode, *inoptr;
 
 #define NULLINODE ((inoptr)NULL)
@@ -309,7 +322,7 @@ typedef struct direct {
  */
 #define FILESYS_TABSIZE 50
 typedef struct filesys { // note: exists in mem and on disk
-    uint16_t       s_mounted;
+    uint16_t      s_mounted;
     uint16_t      s_isize;
     uint16_t      s_fsize;
     uint16_t      s_nfree;
@@ -326,9 +339,34 @@ typedef struct filesys { // note: exists in mem and on disk
     uint32_t      s_time;
     blkno_t       s_tfree;
     uint16_t      s_tinode;
-    inoptr        s_mntpt;     /* Mount point */
-    /* TODO: Add geometry hints and support > 512 byte blocks */
+    uint8_t	  s_shift;	/* Extent size */
 } filesys, *fsptr;
+
+/*
+ * Superblock with userspace fields that are not kept in the kernel
+ * mount table.
+ */
+struct filesys_user {
+    struct filesys s_fs;
+    /* Allow for some kernel expansion */
+    uint8_t	  s_reserved;
+    uint16_t	  s_reserved2[16];
+    /* This is only used by userspace */
+    uint16_t	  s_props;	/* Property bits indicating which are valid */
+#define S_PROP_LABEL	1
+#define S_PROP_GEO	2
+    /* For now only one property set - geometry. We'll eventually use this
+       when we don't know physical geometry and need to handle stuff with
+       tools etc */
+    uint8_t	  s_label_name[32];
+
+    uint16_t      s_geo_heads;	/* If 0/0/0 is specified and valid it means */
+    uint16_t	  s_geo_cylinders; /* pure LBA - no idea of geometry */
+    uint16_t	  s_geo_sectors;
+    uint8_t	  s_geo_skew;	/* Soft skew if present (for hard sectored media) */
+                                /* Gives the skew (1/2/3/4/5/... etc) */
+    uint8_t	  s_geo_secsize;/* Physical sector size in log2 form*/
+};
 
 typedef struct oft {
     off_t     o_ptr;      /* File position pointer */
@@ -341,6 +379,7 @@ typedef struct oft {
 struct mount {
     uint16_t m_dev;
     uint16_t m_flags;
+    inoptr   m_mntpt;     /* Mount point */
     struct filesys m_fs;
 };
 #define MS_RDONLY	1
@@ -354,10 +393,11 @@ struct mount {
 /* The sleeping range must be together see swap.c */
 #define P_READY         2    /* Runnable   */
 #define P_SLEEP         3    /* Sleeping; can be awakened by signal */
-#define P_STOPPED       4    /* Sleeping, don't wake up for signal */
-#define P_FORKING       5    /* In process of forking; do not mess with */
-#define P_ZOMBIE        6    /* Exited. */
-#define P_NOSLEEP	7    /* In an internal state where sleep is forbidden */
+#define P_IOWAIT	4    /* Sleeping: don't wake for a signal */
+#define P_STOPPED       5    /* Sleeping, signal driven halt */
+#define P_FORKING       6    /* In process of forking; do not mess with */
+#define P_ZOMBIE        7    /* Exited. */
+#define P_NOSLEEP	8    /* In an internal state where sleep is forbidden */
 
 
 /* 0 is used to mean 'check we could signal this process' */
@@ -407,11 +447,12 @@ struct mount {
 #define A_SHUTDOWN		1
 #define A_REBOOT		2
 #define A_DUMP			3
-#define A_FREEZE		4	/* Unimplemented, want for NC100 */
+#define A_FREEZE		4	/* Unimplemented, want for NC100? */
 #define A_SWAPCTL		16	/* Unimplemented */
 #define A_CONFIG		17	/* Unimplemented */
 #define A_FTRACE		18	/* Unimplemented: 
                                           Hook to the syscall trace debug */
+#define A_SUSPEND               32	/* Suspend to RAM (optional) */
 
 #define AD_NOSYNC		1
                                           
@@ -512,11 +553,6 @@ typedef struct u_data {
     uint16_t    u_euid;
     uint16_t    u_egid;
     char        u_name[8];      /* Name invoked with */
-    clock_t     u_utime;        /* Elapsed ticks in user mode */
-    clock_t     u_stime;        /* Ticks in system mode */
-    clock_t     u_cutime;       /* Total childrens ticks */
-    clock_t     u_cstime;
-    clock_t     u_time;         /* Start time */
     
     /* This section is not written out except as padding */
     uint8_t     u_files[UFTSIZE];       /* Process file table: indices into open file table, or NO_FILE. */
@@ -709,7 +745,13 @@ struct s_argblk {
 #define HDIO_GET_IDENTITY	0x0102	/* Not yet implemented anywhere */
 #define BLKFLSBUF		0x4103	/* Use the Linux name */
 #define HDIO_RAWCMD		0x4104	/* Issue a raw command, ioctl data
-					   is device dependant ! */
+                                           is device dependent */
+#define HDIO_EJECT		0x0105	/* Request a media eject */
+
+/*
+ *	Floppy disk ioctl s0x01Fx (see fdc.h)
+ */
+
 /*
  *	Sound ioctls 02xx (see audio.h)
  */
@@ -726,6 +768,15 @@ struct s_argblk {
 /*
  *	Drivewire ioctls 050x (see drivewire.h)
  */
+
+/*
+ *	Input ioctls 0x052x (see input.h)
+ */
+
+/*
+ *	Tape ioctls 0x06xx (see tape.h)
+ */
+
 
 /*
  *	System info shared with user space
@@ -750,7 +801,6 @@ struct selmap {
 /* functions in common memory */
 
 /* debug functions */
-extern void trap_monitor(void);
 extern void idump(void);
 
 /* platform/device.c */
@@ -811,12 +861,11 @@ extern void brelse(bufptr);
 extern void bawrite(bufptr);
 extern int bfree(bufptr bp, uint8_t dirty); /* dirty: 0=clean, 1=dirty (write back), 2=dirty+immediate write */
 extern void *tmpbuf(void);
-extern void *zerobuf(void);
+extern bufptr zerobuf(void);
 extern void bufsync(void);
 extern bufptr bfind(uint16_t dev, blkno_t blk);
 extern void bdrop(uint16_t dev);
 extern bufptr freebuf(void);
-#define tmpfree(x)	brelse((void *)x)
 extern void bufinit(void);
 extern void bufdiscard(bufptr bp);
 extern void bufdump (void);
@@ -833,6 +882,7 @@ extern bool insq(struct s_queue *q, unsigned char c);
 extern bool remq(struct s_queue *q, unsigned char *cp);
 extern void clrq(struct s_queue *q);
 extern bool uninsq(struct s_queue *q, unsigned char *cp);
+extern bool fullq(struct s_queue *q);
 extern int psleep_flags_io(void *event, unsigned char flags);
 extern int psleep_flags(void *event, unsigned char flags);
 extern int nxio_open(uint8_t minor, uint16_t flag);
@@ -902,12 +952,14 @@ extern unsigned int ugetblk(bufptr bp, usize_t from, usize_t size);
 
 /* process.c */
 extern void psleep(void *event);
+extern void psleep_nosig(void *event);
 extern void wakeup(void *event);
 extern void pwake(ptptr p);
 extern ptptr getproc(void);
 extern void newproc(ptptr p);
 extern ptptr ptab_alloc(void);
 extern void ssig(ptptr proc, uint8_t sig);
+extern void recalc_cursig(void);
 extern uint8_t chksigs(void);
 extern void program_vectors(uint16_t *pageptr);
 extern void sgrpsig(uint16_t pgrp, uint8_t sig);
@@ -980,20 +1032,31 @@ extern int pagemap_alloc(ptptr p);
 extern int pagemap_realloc(usize_t c, usize_t d, usize_t s);
 extern usize_t pagemap_mem_used(void);
 extern void map_init(void);
+
+/* Platform interfaces */
+
 #ifndef platform_discard
 extern void platform_discard(void);
 #endif
+#ifndef platform_copyright
+extern void platform_copyright(void);
+#endif
 extern void platform_idle(void);
-extern uint8_t rtc_secs(void);
-extern void trap_reboot(void);
+extern uint8_t platform_rtc_secs(void);
+extern int platform_rtc_read(void);
+extern int platform_rtc_write(void);
+extern void platform_reboot(void);
+extern void platform_monitor(void);
 extern uint8_t platform_param(char *p);
+extern void platform_switchout(void);
+extern void platform_interrupt(void);
+extern uint8_t platform_suspend(void);
+
+extern void platform_swap_found(uint8_t part, uint8_t letter);
 
 extern irqflags_t __hard_di(void);
 extern void __hard_irqrestore(irqflags_t f);
 extern void __hard_ei(void);
-
-extern int platform_rtc_read(void);
-extern int platform_rtc_write(void);
 
 #ifndef CONFIG_SOFT_IRQ
 #define di __hard_di
@@ -1003,7 +1066,6 @@ extern int platform_rtc_write(void);
 
 /* Will need a uptr_t eventually */
 extern uaddr_t ramtop;	     /* Note: ramtop must be in common in some cases */
-extern void platform_interrupt(void);
 extern void invalidate_cache(uint16_t page);
 extern void flush_cache(ptptr p);
 

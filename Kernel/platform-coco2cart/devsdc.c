@@ -58,7 +58,7 @@ typedef void (*sdc_transfer_function_t)( unsigned char *addr);
 
 
 /* blkdev method: transfer sectors */
-static uint8_t sdc_transfer(uint8_t minor, bool is_read, uint8_t rawflag)
+static uint16_t sdc_transfer(uint8_t minor, bool is_read, uint8_t rawflag)
 {
        	uint8_t nb = 0;
 	uint32_t lba;             /* holds 32 bit lsn */
@@ -120,7 +120,7 @@ static uint8_t sdc_transfer(uint8_t minor, bool is_read, uint8_t rawflag)
 		nb++;
 	}
 	/*  Huzzah!  success! */
-	return nb << 9;
+	return nb << 8;
 	/* Boo!  failure */
  fail:	sdc_reg_ctl = 0x00;
 	udata.u_error = EIO;

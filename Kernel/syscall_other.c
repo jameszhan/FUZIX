@@ -435,7 +435,7 @@ static int do_umount(uint16_t dev)
 		return 0;
 	}
 
-	i_deref(mnt->m_fs.s_mntpt);
+	i_deref(mnt->m_mntpt);
 	/* Vanish the entry */
 	mnt->m_dev = NO_DEVICE;
 	return 0;
@@ -535,11 +535,20 @@ arg_t _uadmin(void)
 	if (func != AD_NOSYNC)
 		sync();
 	/* Wants moving into machine specific files */
-	if (cmd == A_SHUTDOWN || cmd == A_DUMP)
-		trap_monitor();
+	if (cmd == A_SHUTDOWN || cmd == A_DUMP) {
+		kputs("Halted.\n");
+		platform_monitor();
+	}
 	if (cmd == A_REBOOT)
-		trap_reboot();
-
+		platform_reboot();
+#ifdef CONFIG_PLATFORM_SUSPEND
+	if (cmd == A_SUSPEND) {
+		udata.u_error = platform_suspend();
+		if (udata.u_error)
+			return -1;
+		return 0;
+	}
+#endif
 	/* We don't do SWAPCTL yet */
 	udata.u_error = EINVAL;
 	return -1;

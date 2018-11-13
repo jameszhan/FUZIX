@@ -8,7 +8,6 @@
 	        .area _CONST
 	        .area _INITIALIZED
 	        .area _DATA
-	        .area _INITIALIZER
 	        .area _BSEG
 	        .area _BSS
 	        .area _HEAP
@@ -21,6 +20,9 @@
 		.area _BUFFERS
 		.area _DISCARD
 	        .area _COMMONMEM
+	        ; Doesn't matter if these go over the I/O space as they are
+		; removed at the end of the build
+	        .area _INITIALIZER
 
         	; imported symbols
         	.globl _fuzix_main
@@ -70,6 +72,11 @@ start:
 		ld bc, #l__BUFFERS - 1
 		ld (hl), #0
 		ldir
+		ld hl,#s__COMMONMEM
+		ld de,#s__DISCARD
+		or a
+		sbc hl,de
+		ld (_discard_size),hl
 		call init_early
 		call init_hardware
 		call _fuzix_main
@@ -79,4 +86,4 @@ stop:		halt
 
 		.area _DISCARD
 _discard_size:
-		.dw l__DISCARD
+		.dw 0

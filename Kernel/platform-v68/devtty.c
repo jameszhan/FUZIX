@@ -16,6 +16,18 @@ struct s_queue ttyinq[NUM_DEV_TTY + 1] = {	/* ttyinq[0] is never used */
 	{tbuf1, tbuf1, tbuf1, TTYSIZ, 0, TTYSIZ / 2},
 };
 
+static tcflag_t console_mask[4] = {
+	_ISYS,
+	_OSYS,
+	_CSYS,
+	_LSYS
+};
+
+tcflag_t *termios_mask[NUM_DEV_TTY + 1] = {
+	NULL,
+	console_mask
+};
+
 /* Output for the system console (kprintf etc) */
 void kputchar(char c)
 {
@@ -35,7 +47,7 @@ void tty_putc(uint8_t minor, unsigned char c)
 	*uart_data = c;	/* Data */
 }
 
-void tty_setup(uint8_t minor)
+void tty_setup(uint8_t minor, uint8_t flags)
 {
 }
 
@@ -45,6 +57,10 @@ int tty_carrier(uint8_t minor)
 }
 
 void tty_sleeping(uint8_t minor)
+{
+}
+
+void tty_data_consumed(uint8_t minor)
 {
 }
 
